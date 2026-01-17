@@ -1,3 +1,5 @@
+const APP_VERSION = "v1.0";
+
 import "./style.css";
 import { astro } from "iztro";
 import logoUrl from "./assets/ziwei-logo.png";
@@ -1136,7 +1138,19 @@ document.querySelector("#app").innerHTML = `
     box-shadow:0 10px 30px rgba(0,0,0,0.6);
     font-weight:900;
   ">Selected chart deleted!</div>
-</div>
+  <!-- Footer -->
+  <div style="
+    margin-top:16px;
+    padding:10px 0;
+    text-align:center;
+    font-size:12px;
+    color:rgba(255,255,255,0.55);
+    border-top:1px solid rgba(255,255,255,0.08);
+  ">
+    Ziwei Helper · <span id="appVersion"></span>
+  </div>
+
+  </div>
 `;
 
 /**
@@ -1152,6 +1166,9 @@ if (logoImg) {
     logoImg.src = logoHref;
   };
 }
+const versionEl = document.getElementById("appVersion");
+if (versionEl) versionEl.textContent = APP_VERSION;
+
 
 /* ========= DOM ========= */
 const out = document.getElementById("out");
