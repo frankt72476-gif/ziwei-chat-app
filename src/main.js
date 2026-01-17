@@ -538,6 +538,10 @@ document.querySelector("#app").innerHTML = `
     --border2:rgba(255,255,255,0.14);
     --btn:#2b2f3a;
     --good:#22c55e;
+    --chat-primary: #8f7cff;          /* main purple */
+    --chat-primary-bg: rgba(143,124,255,0.18);
+    --chat-primary-border: rgba(143,124,255,0.45);
+
   }
 
   .wrap{
@@ -742,27 +746,103 @@ document.querySelector("#app").innerHTML = `
     line-height:1.35;
   }
 
-  /* Tabs */
-  .tabs{
-    display:flex;
-    gap:8px;
-    margin-top:10px;
-  }
-  .tabBtn{
-    flex:1;
-    padding:10px 12px;
-    border-radius:999px;
-    border:1px solid var(--border2);
-    background:#0f1117;
-    color:rgba(255,255,255,0.80);
-    font-weight:900;
-    cursor:pointer;
-  }
-  .tabBtn.active{
-    background: rgba(140,120,255,0.14);
-    border-color: rgba(140,120,255,0.32);
-    color:#fff;
-  }
+/* Tabs */
+.tabs{
+  display:flex;
+  gap:8px;
+  margin-top:10px;
+}
+.tabBtn{
+  flex:1;
+  padding:10px 12px;
+  border-radius:999px;
+  border:1px solid var(--border2);
+  background:#0f1117;
+  color:rgba(255,255,255,0.80);
+  font-weight:900;
+  cursor:pointer;
+}
+.tabBtn.active{
+  background: rgba(140,120,255,0.14);
+  border-color: rgba(140,120,255,0.32);
+  color:#fff;
+}
+/* ===================== */
+/* Primary Chat Tab      */
+/* ===================== */
+
+.tabBtn.chatPrimary {
+  background: rgba(143,124,255,0.22);
+  border-color: rgba(143,124,255,0.55);
+  color: #ffffff;
+  box-shadow:
+    0 0 0 1px rgba(143,124,255,0.35),
+    0 6px 18px rgba(143,124,255,0.25);
+  font-weight: 900;
+}
+
+.tabBtn.chatPrimary:hover {
+  background: rgba(143,124,255,0.32);
+  border-color: rgba(143,124,255,0.75);
+}
+
+.tabBtn.chatPrimary.active {
+  background: rgba(143,124,255,0.38);
+  border-color: rgba(143,124,255,0.9);
+  box-shadow:
+    0 0 0 1px rgba(143,124,255,0.6),
+    0 8px 22px rgba(143,124,255,0.35);
+}
+/* ===================== */
+/* Chat layout & bubbles */
+/* ===================== */
+
+#paneChat {
+  text-align: left;
+}
+
+.chatLog {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: stretch;   /* prevents centering */
+  text-align: left;
+}
+
+.chatBubble {
+  max-width: 92%;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(255,255,255,0.12);
+  background: #0f1117;
+  line-height: 1.35;
+  white-space: pre-wrap;
+  text-align: left;
+}
+
+.chatBubble.user {
+  margin-left: auto;
+}
+
+.chatBubble.assistant {
+  margin-right: auto;
+}
+.chatRow{
+  display:flex;
+}
+.chatRow.user{ justify-content:flex-end; }
+.chatRow.assistant{ justify-content:flex-start; }
+
+.chatMeta{
+  font-size:12px;
+  opacity:0.75;
+  font-weight:900;
+  margin-bottom:6px;
+}
+.chatText{
+  white-space:pre-wrap;
+}
+
 
   .tabPane{
     margin-top:10px;
@@ -819,12 +899,12 @@ document.querySelector("#app").innerHTML = `
     <!-- STEP 1 -->
     <div class="stepTitleRow">
       <span class="stepBadge">1</span>
-      <h3 class="stepTitle">Pick from Saved Charts / Enter New Chart</h3>
+      <h3 class="stepTitle">命主</h3>
     </div>
 
     <div style="display:flex; flex-direction:column; gap:12px">
       <div>
-        <label class="label">Pick from Saved Charts</label>
+        <label class="label">選擇命主資料</label>
         <div class="pickWrap">
           <select id="pick" class="field" style="padding-right:94px"></select>
           <button id="deletePick" class="deleteBtn" disabled>Delete</button>
@@ -838,7 +918,7 @@ document.querySelector("#app").innerHTML = `
       </div>
 
       <div class="panel">
-        <div style="font-weight:900; margin-bottom:10px; color:#fff">Enter New Chart</div>
+        <div style="font-weight:900; margin-bottom:10px; color:#fff">建立新命主資料</div>
 
         <div class="row2">
           <input id="label" class="field" placeholder="Label (e.g. Son)" />
@@ -870,7 +950,7 @@ document.querySelector("#app").innerHTML = `
         </div>
 
         <div class="hint">
-          (After saving the new chart, go back to "Pick from Saved Charts" dropdown menu to select the chart to be analyzed)
+          (確認命主資料正確 - Make sure desired profile is shown in the 選擇命主資料 dropdown menu.  If not, please reselect)
         </div>
       </div>
     </div>
@@ -878,34 +958,34 @@ document.querySelector("#app").innerHTML = `
     <!-- STEP 2 -->
     <div class="stepTitleRow">
       <span class="stepBadge">2</span>
-      <h3 class="stepTitle">Choose ONE mode</h3>
+      <h3 class="stepTitle">選擇分析時間範圍</h3>
     </div>
 
     <div class="panel">
       <label style="display:flex; align-items:center; justify-content:flex-start; gap:10px; margin:8px 0; font-weight:700">
 
         <input type="radio" name="mode" value="life" checked />
-        Option 1: Life Fortune Overall
+        Option 1: 人生整體運勢
       </label>
       <label style="display:flex; align-items:center; justify-content:flex-start; gap:10px; margin:8px 0; font-weight:700">
 
         <input type="radio" name="mode" value="decadal" />
-        Option 2: Choose 大限
+        Option 2: 大限
       </label>
       <label style="display:flex; align-items:center; justify-content:flex-start; gap:10px; margin:8px 0; font-weight:700">
 
         <input type="radio" name="mode" value="year" />
-        Option 3: Choose 流年
+        Option 3: 流年
       </label>
       <label style="display:flex; align-items:center; justify-content:flex-start; gap:10px; margin:8px 0; font-weight:700">
 
         <input type="radio" name="mode" value="month" />
-        Option 4: Choose 流月
+        Option 4: 流月
       </label>
       <label style="display:flex; align-items:center; justify-content:flex-start; gap:10px; margin:8px 0; font-weight:700">
 
         <input type="radio" name="mode" value="date" />
-        Option 5: Choose 流日
+        Option 5: 流日
       </label>
     </div>
 
@@ -942,20 +1022,57 @@ document.querySelector("#app").innerHTML = `
 
     <!-- Tabs -->
     <div class="tabs">
-      <button id="tabChat" class="tabBtn active" type="button">Chat</button>
+      <button id="tabChat" class="tabBtn chatPrimary active" type="button">Chat</button>
       <button id="tabData" class="tabBtn" type="button">Data</button>
     </div>
 
-    <!-- Chat Tab -->
-    <div id="paneChat" class="tabPane">
-      <textarea id="ctx" rows="5" class="field" style="background:#12141b"
-        placeholder="Example: fencing competition outcome, school program application, relationship questions, etc."></textarea>
-<button id="testGpt" class="saveBtn" style="margin-top:10px">Test GPT Call</button>
+<!-- Chat Tab -->
+<div id="paneChat" class="tabPane">
 
-      <div class="hint">
-        Tip: changes auto-generate results. (選項變更後會自動生成結果)
-      </div>
-    </div>
+  <!-- Context (still used by your Data packet) -->
+  
+  <!-- Credit meter -->
+  <div style="display:flex;justify-content:flex-end;margin-top:8px">
+    <div id="creditMeter" style="
+      font-size:12px;
+      color:rgba(255,255,255,0.72);
+      border:1px solid rgba(255,255,255,0.12);
+      padding:6px 10px;
+      border-radius:999px;
+      background:#0f1117;
+      font-weight:900;
+    ">Credit: 0%</div>
+  </div>
+  
+  <!-- Composer -->
+  <div style="margin-top:10px; display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap">
+    <textarea id="chatInput" rows="2" class="field" style="flex:1; min-width:220px"
+      placeholder="Ask a question… (e.g., 這次比賽策略？/ 今年升學？/ 感情？)"></textarea>
+
+    <button id="chatSend" class="saveBtn" style="width:auto; padding:11px 16px">Send</button>
+    <button id="chatClear" class="saveBtn" style="width:auto; padding:11px 16px; background:#222; border-color:#444">Clear</button>
+  </div>
+  
+  <!-- Chat log -->
+  <div id="chatLog" style="
+    margin-top:10px;
+    border:1px solid rgba(255,255,255,0.10);
+    background:#10121a;
+    border-radius:12px;
+    padding:10px;
+    min-height:220px;
+    max-height:48vh;
+    overflow:auto;
+    display:flex;
+    flex-direction:column;
+    gap:10px;
+  "></div>
+
+  <div id="chatStatus" class="hint" style="margin-top:8px">
+    Tip: mode changes regenerate Data and will auto-refresh the last assistant reply.
+  </div>
+</div>
+
 
     <!-- Data Tab -->
     <div id="paneData" class="tabPane" style="display:none">
@@ -1065,6 +1182,309 @@ const paneData = document.getElementById("paneData");
 let profiles = loadProfiles();
 let lastPacket = "";
 let toastTimer = null;
+/* ========= Chat + Cost Tracking ========= */
+
+// Local chat storage
+const CHAT_KEY = "zw_chat_sessions_v1";
+const COST_KEY = "zw_cost_v1";
+
+function loadChatStore() {
+  return JSON.parse(localStorage.getItem(CHAT_KEY) || "{}");
+}
+function saveChatStore(store) {
+  localStorage.setItem(CHAT_KEY, JSON.stringify(store));
+}
+
+function loadCost() {
+  return JSON.parse(localStorage.getItem(COST_KEY) || '{"usd":0,"rollovers":0}');
+}
+function saveCost(c) {
+  localStorage.setItem(COST_KEY, JSON.stringify(c));
+}
+
+// Pricing: update these if you want more accurate estimates.
+// (Placeholders; safe defaults.)
+const COST_PER_1M_INPUT = 0.20;   // USD per 1M input tokens (placeholder)
+const COST_PER_1M_OUTPUT = 0.80;  // USD per 1M output tokens (placeholder)
+const CREDIT_USD = 10.0;
+
+// UI elems (exist after template render)
+const chatLogEl = document.getElementById("chatLog");
+const chatInputEl = document.getElementById("chatInput");
+const chatSendBtn = document.getElementById("chatSend");
+const chatClearBtn = document.getElementById("chatClear");
+const chatStatusEl = document.getElementById("chatStatus");
+const creditMeterEl = document.getElementById("creditMeter");
+
+function currentSessionKey() {
+  // Session is per: selected profile + mode + targetStr (so year/month/date changes become a new session)
+  const idx = Number(pick.value);
+  const p = Number.isFinite(idx) ? profiles[idx] : null;
+  if (!p) return "no_profile";
+
+  const mode = getSelectedMode();
+
+  // Mirror your target selection logic
+  let t = "";
+  if (mode === "life") t = "life";
+  else if (mode === "decadal") t = decadalPick?.selectedOptions?.[0]?.dataset?.date || "";
+  else if (mode === "year") t = yearPick?.selectedOptions?.[0]?.dataset?.date || "";
+  else if (mode === "month") t = (monthInput?.value || "").trim();
+  else t = (target?.value || "").trim();
+
+  return [
+    "p",
+    p.label, p.date, String(p.time), p.gender,
+    "mode", mode,
+    "t", t || "(unset)"
+  ].join("|");
+}
+
+function getSessionMessages() {
+  const store = loadChatStore();
+  const key = currentSessionKey();
+  return Array.isArray(store[key]) ? store[key] : [];
+}
+
+function setSessionMessages(msgs) {
+  const store = loadChatStore();
+  const key = currentSessionKey();
+  store[key] = msgs;
+  saveChatStore(store);
+}
+
+function escapeHtml(s) {
+  return String(s)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
+}
+
+function renderChat() {
+  if (!chatLogEl) return;
+  const msgs = getSessionMessages();
+
+  if (!msgs.length) {
+    chatLogEl.className = "chatLog";
+    chatLogEl.innerHTML = `<div style="color:rgba(255,255,255,0.65);font-size:13px">
+      No messages yet. Ask something below.
+    </div>`;
+    return;
+  }
+
+  chatLogEl.className = "chatLog";
+
+  chatLogEl.innerHTML = msgs
+    .map((m) => {
+      const isUser = m.role === "user";
+      const label = isUser ? "You" : "Assistant";
+      const roleClass = isUser ? "user" : "assistant";
+
+      return `
+        <div class="chatRow ${roleClass}">
+          <div class="chatBubble ${roleClass}">
+            <div class="chatMeta">${label}</div>
+            <div class="chatText">${escapeHtml(m.content)}</div>
+          </div>
+        </div>
+      `;
+    })
+    .join("");
+
+  chatLogEl.scrollTop = chatLogEl.scrollHeight;
+}
+
+
+function setChatStatus(text) {
+  if (chatStatusEl) chatStatusEl.textContent = text;
+}
+
+function updateCreditUI() {
+  const c = loadCost();
+  // rollovers simulate "rebill when cross $10"
+  const spendThisCycle = c.usd % CREDIT_USD;
+  const pct = Math.min(100, Math.round((spendThisCycle / CREDIT_USD) * 100));
+  if (creditMeterEl) creditMeterEl.textContent = `Credit: ${pct}%`;
+}
+
+function addUsageCost(usage) {
+  if (!usage || typeof usage !== "object") return;
+
+  // Responses API usage can be: { input_tokens, output_tokens, total_tokens }
+  const inputTokens = Number(usage.input_tokens || 0);
+  const outputTokens = Number(usage.output_tokens || 0);
+
+  const usd =
+    (inputTokens / 1_000_000) * COST_PER_1M_INPUT +
+    (outputTokens / 1_000_000) * COST_PER_1M_OUTPUT;
+
+  const c = loadCost();
+  const before = c.usd || 0;
+  const after = before + usd;
+
+  // rollover counting (optional)
+  const beforeCycles = Math.floor(before / CREDIT_USD);
+  const afterCycles = Math.floor(after / CREDIT_USD);
+  c.usd = after;
+  c.rollovers = (c.rollovers || 0) + Math.max(0, afterCycles - beforeCycles);
+
+  saveCost(c);
+  updateCreditUI();
+}
+
+async function callGpt(messages) {
+  const resp = await fetch("/.netlify/functions/openai-chat", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: "gpt-4.1-mini",
+      contextPacket: lastPacket || "",
+      messages,
+    }),
+  });
+
+  const raw = await resp.text();
+
+  // ✅ Better error extraction (shows the real reason)
+  if (!resp.ok) {
+    let msg = raw;
+    try {
+      const j = JSON.parse(raw);
+      // prefer OpenAI detail; fallback to {error}
+      msg = j?.detail
+        ? (typeof j.detail === "string" ? j.detail : JSON.stringify(j.detail))
+        : (j?.error || raw);
+    } catch {}
+    throw new Error(msg);
+  }
+
+  const data = JSON.parse(raw);
+  return data; // { text, usage }
+}
+
+
+// Send a user message and get assistant reply
+let isSending = false;
+async function sendChatMessage(userText) {
+  if (isSending) return;
+  const text = (userText || "").trim();
+  if (!text) return;
+
+  if (!lastPacket || !lastPacket.trim()) {
+    setChatStatus("Please generate Data first: select a saved chart (Step 1).");
+    setActiveTab("data");
+    return;
+  }
+
+  isSending = true;
+  setChatStatus("Sending…");
+
+  const msgs = getSessionMessages();
+  msgs.push({ role: "user", content: text });
+  setSessionMessages(msgs);
+  renderChat();
+
+  try {
+    const data = await callGpt(msgs);
+    const reply = (data?.text || "").trim() || "(no response)";
+    msgs.push({ role: "assistant", content: reply });
+    setSessionMessages(msgs);
+    renderChat();
+    addUsageCost(data?.usage);
+    setChatStatus("Done.");
+  } catch (e) {
+    setChatStatus("GPT call failed.");
+    alert("GPT call failed:\n" + (e?.message || String(e)));
+  } finally {
+    isSending = false;
+  }
+}
+
+// Auto-refresh last assistant reply when packet changes
+let autoRefreshTimer = null;
+async function autoRefreshLastAssistant() {
+  if (isSending) return;
+
+  const msgs = getSessionMessages();
+  if (!msgs.length) return;
+
+  // Need at least: user -> assistant (or just user)
+  const lastUserIdx = (() => {
+    for (let i = msgs.length - 1; i >= 0; i--) if (msgs[i].role === "user") return i;
+    return -1;
+  })();
+  if (lastUserIdx < 0) return;
+
+  // Recompute assistant answer to the last user message using updated packet,
+  // replacing the last assistant message if it exists after that user turn.
+  const cut = msgs.slice(0, lastUserIdx + 1);
+
+  isSending = true;
+  setChatStatus("Mode changed: refreshing answer with updated Data…");
+
+  try {
+    const data = await callGpt(cut);
+    const reply = (data?.text || "").trim() || "(no response)";
+
+    // If last message is assistant, replace it; else append.
+    let newMsgs = msgs.slice();
+    const lastIsAssistant = newMsgs.length && newMsgs[newMsgs.length - 1].role === "assistant";
+
+    if (lastIsAssistant) {
+      newMsgs[newMsgs.length - 1] = {
+        role: "assistant",
+        content: reply + "\n\n(Updated due to mode/target/context change)",
+      };
+    } else {
+      newMsgs.push({
+        role: "assistant",
+        content: reply + "\n\n(Updated due to mode/target/context change)",
+      });
+    }
+
+    setSessionMessages(newMsgs);
+    renderChat();
+    addUsageCost(data?.usage);
+    setChatStatus("Updated.");
+  } catch (e) {
+    setChatStatus("Auto-refresh failed.");
+    console.warn("Auto-refresh failed:", e);
+  } finally {
+    isSending = false;
+  }
+}
+
+function scheduleAutoRefresh(ms = 250) {
+  if (autoRefreshTimer) clearTimeout(autoRefreshTimer);
+  autoRefreshTimer = setTimeout(() => {
+    autoRefreshLastAssistant();
+  }, ms);
+}
+
+/* ===== ADD THIS RIGHT HERE (IMMEDIATELY AFTER scheduleAutoRefresh) ===== */
+
+// Chat send / clear
+chatSendBtn.onclick = () => {
+  const text = (chatInputEl.value || "").trim();
+  if (!text) return;
+  chatInputEl.value = "";
+  sendChatMessage(text);
+};
+
+chatClearBtn.onclick = () => {
+  if (!confirm("Clear chat for this session?")) return;
+  setSessionMessages([]);
+  renderChat();
+  setChatStatus("Cleared.");
+};
+
+// Enter to send (Shift+Enter = newline)
+chatInputEl.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) {
+    e.preventDefault();
+    chatSendBtn.click();
+  }
+});
 
 /* ========= Tabs ========= */
 function setActiveTab(which) {
@@ -1432,8 +1852,6 @@ function renderHuman(A) {
     L.push("");
   }
 
-  L.push("【現實情境】");
-  L.push(A.ctx || "");
 
   return L.join("\n");
 }
@@ -1531,8 +1949,6 @@ function renderPacket(A) {
     lp.push("");
   }
 
-  lp.push("【現實情境】");
-  lp.push(A.ctx || "");
 
   return lp.join("\n");
 }
@@ -1561,7 +1977,7 @@ function generateNow() {
     }
 
     const mode = getSelectedMode();
-    const ctx = (document.getElementById("ctx").value || "").trim();
+    const ctx = ""; // no longer used; chat box is the real input
 
     out.textContent = "Generating...";
 
@@ -1614,8 +2030,13 @@ function generateNow() {
       ctx,
     });
 
-    out.textContent = renderHuman(A);
-    lastPacket = renderPacket(A);
+out.textContent = renderHuman(A);
+lastPacket = renderPacket(A);
+
+// If user already has a chat going, refresh the last assistant answer
+// using the updated packet (mode/target/context changes).
+scheduleAutoRefresh(200);
+
   } catch (err) {
     out.textContent =
       "Generate failed:\n" +
@@ -1630,11 +2051,18 @@ refresh(null);
 updateModeUI();
 out.textContent = "Select a saved chart (Step 1) to auto-generate results.";
 
+renderChat();
+updateCreditUI();
+
 /* ========= Events ========= */
 document.querySelectorAll('input[name="mode"]').forEach((r) => {
   r.addEventListener("change", () => {
     updateModeUI();
     scheduleGenerate(0);
+
+    // ✅ ADD THESE TWO LINES
+    renderChat();
+    updateCreditUI();
   });
 });
 
@@ -1649,16 +2077,30 @@ pick.addEventListener("change", () => {
     rebuildAsksForSelectedProfile();
     scheduleGenerate(0);
     setActiveTab("data");
+
+    // ✅ ADD THESE TWO LINES
+    renderChat();
+    updateCreditUI();
   } else {
     out.textContent = "";
   }
 });
-
-decadalPick.addEventListener("change", () => scheduleGenerate(0));
-yearPick.addEventListener("change", () => scheduleGenerate(0));
-monthInput.addEventListener("input", () => scheduleGenerate(250));
-target.addEventListener("input", () => scheduleGenerate(250));
-document.getElementById("ctx").addEventListener("input", () => scheduleGenerate(400));
+decadalPick.addEventListener("change", () => {
+  scheduleGenerate(0);
+  renderChat();
+});
+yearPick.addEventListener("change", () => {
+  scheduleGenerate(0);
+  renderChat();
+});
+monthInput.addEventListener("input", () => {
+  scheduleGenerate(250);
+  renderChat();
+});
+target.addEventListener("input", () => {
+  scheduleGenerate(250);
+  renderChat();
+});
 
 /* ========= Actions ========= */
 document.getElementById("save").onclick = () => {
@@ -1733,33 +2175,4 @@ confirmYes.onclick = () => {
 document.getElementById("copy").onclick = async () => {
   await navigator.clipboard.writeText(lastPacket || "");
   alert("Copied");
-};
-/* ========= GPT TEST CALL (temporary) ========= */
-document.getElementById("testGpt").onclick = async () => {
-  try {
-    if (!lastPacket || !lastPacket.trim()) {
-      alert("Generate Data first (select a saved chart), then try again.");
-      return;
-    }
-
-    const resp = await fetch("/.netlify/functions/openai-chat", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: "gpt-4.1-mini",
-        contextPacket: lastPacket,
-        messages: [
-          { role: "user", content: "Hi — summarize the most important takeaways." }
-        ],
-      }),
-    });
-
-    const raw = await resp.text();
-    if (!resp.ok) throw new Error(raw);
-
-    const data = JSON.parse(raw);
-    alert(data.text || "(no response)");
-  } catch (e) {
-    alert("GPT call failed:\n" + (e?.message || String(e)));
-  }
 };
