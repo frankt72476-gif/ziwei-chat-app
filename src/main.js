@@ -1052,7 +1052,7 @@ document.querySelector("#app").innerHTML = `
       placeholder="Ask a question… (e.g., 這次比賽策略？/ 今年升學？/ 感情？)"></textarea>
 
     <button id="chatSend" class="saveBtn" style="width:auto; padding:11px 16px">Send</button>
-    <button id="chatClear" class="saveBtn" style="width:auto; padding:11px 16px; background:#222; border-color:#444">Clear</button>
+    <button id="chatClear" class="saveBtn" style="width:auto; padding:11px 16px; background:#222; border-color:#444">New Topic / 清空重新開始</button>
   </div>
   
   <!-- Chat log -->
@@ -1070,9 +1070,13 @@ document.querySelector("#app").innerHTML = `
     gap:10px;
   "></div>
 
-  <div id="chatStatus" class="hint" style="margin-top:8px">
-    Tip: mode changes regenerate Data and will auto-refresh the last assistant reply.
-  </div>
+<div id="chatStatus" class="hint" style="margin-top:8px">
+  Tip: mode changes regenerate Data and will auto-refresh the last assistant reply.<br>
+  <span style="opacity:0.85">
+    換話題建議先清空（New Topic），回答會更準
+  </span>
+</div>
+
 </div>
 
 
@@ -1266,9 +1270,14 @@ function getSessionMessages() {
 function setSessionMessages(msgs) {
   const store = loadChatStore();
   const key = currentSessionKey();
-  store[key] = msgs;
+
+  // 🔒 HARD CAP: keep only the last 40 messages
+  const capped = Array.isArray(msgs) ? msgs.slice(-40) : [];
+
+  store[key] = capped;
   saveChatStore(store);
 }
+
 
 function escapeHtml(s) {
   return String(s)
