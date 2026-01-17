@@ -1284,7 +1284,7 @@ function renderChat() {
   if (!msgs.length) {
     chatLogEl.className = "chatLog";
     chatLogEl.innerHTML = `<div style="color:rgba(255,255,255,0.65);font-size:13px">
-      No messages yet. Ask something below.
+      No messages yet. Ask something above.
     </div>`;
     return;
   }
