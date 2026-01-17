@@ -2,4 +2,16 @@
   command = "npm run build"
   publish = "dist"
   functions = "netlify/functions"
-# redeploy
+
+# 1) Ensure function routes go to Functions (so SPA redirect won't hijack them)
+[[redirects]]
+  from = "/.netlify/functions/*"
+  to = "/.netlify/functions/:splat"
+  status = 200
+  force = true
+
+# 2) SPA catch-all (so refresh/deep links go to index.html)
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
