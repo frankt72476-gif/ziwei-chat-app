@@ -1,4 +1,10 @@
-const APP_VERSION = "v1.0";
+// =====================
+// Ziwei Helper (v1.1)
+// - 因果鏈顯性化（起因宮→承受宮＋祿/權/科/忌＋四化星名）
+// - 可調整點 vs 不可調整點（決策輔助輸出）
+// =====================
+
+const APP_VERSION = "v1.1";
 
 import "./style.css";
 import { astro } from "iztro";
@@ -46,6 +52,89 @@ function ymd(d) {
 function getSelectedMode() {
   const el = document.querySelector('input[name="mode"]:checked');
   return el ? el.value : "life";
+}
+function pad2(n) {
+  return String(n).padStart(2, "0");
+}
+
+function daysInMonth(year, month) {
+  // month: 1-12
+  return new Date(year, month, 0).getDate();
+}
+
+function buildDobSelects() {
+  // Year range: adjust as you like
+  const nowY = new Date().getFullYear();
+  const startY = nowY - 100;
+  const endY = nowY + 2;
+
+  dobYear.innerHTML = "";
+  for (let y = endY; y >= startY; y--) {
+    const opt = document.createElement("option");
+    opt.value = String(y);
+    opt.textContent = String(y);
+    dobYear.appendChild(opt);
+  }
+
+  dobMonth.innerHTML = "";
+  for (let m = 1; m <= 12; m++) {
+    const opt = document.createElement("option");
+    opt.value = pad2(m);
+    opt.textContent = pad2(m);
+    dobMonth.appendChild(opt);
+  }
+
+  function rebuildDays() {
+    const y = Number(dobYear.value);
+    const m = Number(dobMonth.value);
+    const maxD = daysInMonth(y, m);
+    const prev = Number(dobDay.value || 1);
+
+    dobDay.innerHTML = "";
+    for (let d = 1; d <= maxD; d++) {
+      const opt = document.createElement("option");
+      opt.value = pad2(d);
+      opt.textContent = pad2(d);
+      dobDay.appendChild(opt);
+    }
+    dobDay.value = pad2(Math.min(prev, maxD));
+  }
+
+  // Defaults
+  dobYear.value = String(nowY - 30);
+  dobMonth.value = "01";
+  rebuildDays();
+  dobDay.value = "01";
+
+  dobYear.addEventListener("change", rebuildDays);
+  dobMonth.addEventListener("change", rebuildDays);
+}
+
+function getDobYMDFromSelects() {
+  const y = (dobYear.value || "").trim();
+  const m = (dobMonth.value || "").trim();
+  const d = (dobDay.value || "").trim();
+  if (!/^\d{4}$/.test(y) || !/^\d{2}$/.test(m) || !/^\d{2}$/.test(d)) return "";
+  return `${y}-${m}-${d}`;
+}
+
+function setDobSelectsFromYMD(ymdStr) {
+  const [y, m, d] = String(ymdStr || "").split("-");
+  if (!/^\d{4}$/.test(y) || !/^\d{2}$/.test(m) || !/^\d{2}$/.test(d)) return;
+
+  dobYear.value = y;
+  dobMonth.value = m;
+
+  // trigger rebuild days safely
+  const maxD = daysInMonth(Number(y), Number(m));
+  dobDay.innerHTML = "";
+  for (let dd = 1; dd <= maxD; dd++) {
+    const opt = document.createElement("option");
+    opt.value = pad2(dd);
+    opt.textContent = pad2(dd);
+    dobDay.appendChild(opt);
+  }
+  dobDay.value = pad2(Math.min(Number(d), maxD));
 }
 
 /* ========= Helpers ========= */
@@ -195,7 +284,10 @@ function computeIncomingTop(rows) {
 function prettyIncomingTopLine(prefix, rows) {
   const top = computeIncomingTop(rows);
   if (!top.length) return `${prefix}：（無）`;
-  return `${prefix}：${top.slice(0, 8).map(([k, v]) => `${k}(${v})`).join("、")}`;
+  return `${prefix}：${top
+    .slice(0, 8)
+    .map(([k, v]) => `${k}(${v})`)
+    .join("、")}`;
 }
 
 /* ========= 四化星名：只讀 iztro scope.mutagen（不推天干、不猜） ========= */
@@ -334,6 +426,162 @@ function buildYearOptions(profile, yearsForward = 80) {
   return out;
 }
 
+/* ========= 因果鏈（四化飛化→有向邊）+ 可調整性 ========= */
+
+const MUT_KEYS = ["禄", "权", "科", "忌"];
+
+/**
+ * 將 mutagenList [禄,权,科,忌] 轉成 map：{禄:"太陽", ...}
+ */
+function mutagenMapFromList(mutagenList) {
+  if (!Array.isArray(mutagenList) || mutagenList.length < 4) return null;
+  return {
+    禄: String(mutagenList[0] || ""),
+    权: String(mutagenList[1] || ""),
+    科: String(mutagenList[2] || ""),
+    忌: String(mutagenList[3] || ""),
+  };
+}
+
+/**
+ * 從 rows（每宮的 flies）建立因果邊：
+ * edge = {from, to, mut, mutagenStar}
+ * - mutagenStar：如果該層 scope 有 mutagenList，就填對應四化星名；否則空字串
+ */
+function buildCausalEdgesFromRows(rows, mutagenList = null) {
+  if (!Array.isArray(rows)) return [];
+  const map = mutagenMapFromList(mutagenList);
+  const edges = [];
+
+  for (const r of rows) {
+    const from = r?.palace;
+    const f = r?.flies || {};
+    if (!from) continue;
+
+    for (const k of MUT_KEYS) {
+      const to = f?.[k];
+      if (!to || to === "（無）") continue;
+
+      edges.push({
+        from,
+        to,
+        mut: k,
+        mutagenStar: map ? (map[k] || "") : "",
+      });
+    }
+  }
+
+  // de-dup
+  const seen = new Set();
+  const out = [];
+  for (const e of edges) {
+    const key = `${e.from}|${e.to}|${e.mut}|${e.mutagenStar}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(e);
+  }
+  return out;
+}
+
+/**
+ * 針對焦點宮位，輸出：
+ * - incoming：誰把四化飛到我（起因宮→承受宮=focus）
+ * - outgoing：我飛到哪（focus→承受宮）
+ * - causes：起因宮去重（可調整點候選）
+ */
+function causalSummaryForFocus(edges, focusPalace) {
+  const incoming = edges.filter((e) => e.to === focusPalace);
+  const outgoing = edges.filter((e) => e.from === focusPalace);
+
+  const causes = Array.from(new Set(incoming.map((e) => e.from)));
+  const effects = Array.from(new Set(outgoing.map((e) => e.to)));
+
+  return {
+    focus: focusPalace,
+    incoming,
+    outgoing,
+    causes,
+    effects,
+  };
+}
+
+function fmtEdge(e) {
+  const star = e.mutagenStar ? `（${e.mutagenStar}）` : "";
+  return `${e.from} —${e.mut}${star}→ ${e.to}`;
+}
+
+function prettyCausalSummary(title, summary) {
+  if (!summary) return `（${title}：無資料）`;
+
+  const L = [];
+  L.push(`【${title}｜因果鏈（內部焦點）】`);
+  L.push("");
+
+L.push("【結果症狀（結果面向）】");
+L.push(`- 結果面向（內部定位）：${summary.focus}`);
+
+  L.push("");
+
+  L.push("【源頭問題（起因宮 → 承受宮）】");
+  if (!summary.incoming.length) L.push("（無：此宮未接到四化；或此層資料不足）");
+  else L.push(summary.incoming.map((e) => `- ${fmtEdge(e)}`).join("\n"));
+  L.push("");
+
+  L.push("【外溢影響（此宮作為源頭 → 影響到哪些宮）】");
+  if (!summary.outgoing.length) L.push("（無：此宮未飛出四化；或此層資料不足）");
+  else L.push(summary.outgoing.map((e) => `- ${fmtEdge(e)}`).join("\n"));
+
+  return L.join("\n");
+}
+
+/**
+ * 可調整性（決策輔助）：用「起因宮」做槓桿，並明確標示不可調整/節奏管理
+ */
+const PALACE_LEVERS = {
+  命宫: "自我定位/習慣系統/決策風格（長期設計，不追求短期改命）",
+  官禄: "目標拆解/流程與執行/事業策略（可操作）",
+  财帛: "現金流/定價與成本/資源配置（可操作）",
+  福德: "壓力調節/睡眠與恢復/心態與續航（可操作）",
+  迁移: "外部機會/人脈場域/曝光與渠道（可操作）",
+  仆役: "團隊協作/合作邊界/管理方式（可操作）",
+  夫妻: "溝通機制/期待管理/界線（可操作）",
+  疾厄: "身心負荷管理/作息（節奏管理）",
+  田宅: "環境與資產配置（可操作）",
+  父母: "長輩/上層資源互動（可操作）",
+  兄弟: "同輩合作/競合（可操作）",
+  子女: "教育/養育策略（可操作）",
+};
+
+function buildAdjustabilityPacket({ mode, dominantLabel, focusPalace, dominantCausalSummary }) {
+  const causes = dominantCausalSummary?.causes || [];
+  const levers = causes.map((pn) => ({
+    宮位: pn,
+    可操作方向: PALACE_LEVERS[pn] || "（可操作方向：待補）",
+  }));
+
+  return {
+    不可调: {
+      類型: "不可調整（結構基底）",
+      說明:
+        "本命結構（性格底盤/能力結構/人生主軸）是長期基底；建議用理解與設計去順勢，而不是用短期操作去『改命』。",
+    },
+    可调: {
+      類型: "可調整點（策略槓桿）",
+      焦點宮: focusPalace,
+      說明:
+        "優先從因果鏈的『起因宮』下手，因為它是事件/壓力/資源的發動端；先調起因端，結果端（承受宮）自然更容易改善。",
+      發動宮清單: levers,
+    },
+    节奏: {
+      類型: "節奏管理（應期層）",
+      說明:
+        "流月/流日用於安排節奏、風險控管與資源分配；不把應期當成命運改造的力量。",
+      你的模式: mode,
+      當前主導層: dominantLabel || "（無）",
+    },
+  };
+}
+
 /* ========= 格局判定：本地規則集（約 20 個高頻/高impact） =========
    註：這是「程式規則版」— 只在條件明確時輸出。
 */
@@ -375,13 +623,7 @@ function tfNamesByIndex(astrolabe, idx) {
   return threeFourIndices(idx).map((j) => palaceNameByNatalIndex(astrolabe, j));
 }
 
-function detectPatterns({
-  layerLabel,
-  astrolabe,
-  natalStarsAll,
-  tfPalaceNames,
-  mutagenList, // [禄,权,科,忌] or null
-}) {
+function detectPatterns({ layerLabel, astrolabe, natalStarsAll, tfPalaceNames, mutagenList }) {
   const out = [];
 
   const maj = majorSetInPalaces(astrolabe, tfPalaceNames);
@@ -403,34 +645,34 @@ function detectPatterns({
     if (ok) out.push(`三奇嘉會（禄=${l}落${palL}；权=${q}落${palQ}；科=${k}落${palK}）`);
   }
 
-  // 2) 紫府同宮（簡化）：紫微+天府 同宮坐命（多數說法寅申更佳；此處只做“同宮坐命”）
+  // 2) 紫府同宮（簡化）：紫微+天府 同宮坐命
   {
     const ming = palaceObjByName(astrolabe, "命宫");
     if (hasMajor(ming, "紫微") && hasMajor(ming, "天府")) out.push("紫府同宮（紫微天府同坐命宮）");
   }
 
-  // 3) 機月同梁（程式版）：天機/太陰/天同/天梁 四星皆在命三方四正
+  // 3) 機月同梁（程式版）
   if (hasAll("天机", "太阴", "天同", "天梁")) out.push("機月同梁（四星齊會命三方四正）");
 
-  // 4) 文星拱命：文昌/文曲 在命三方四正（通常看昌曲會命）
+  // 4) 文星拱命
   if (hasMinorAny("文昌", "文曲") || hasAny("文昌", "文曲")) out.push("文星拱命（昌/曲會命三方四正）");
 
-  // 5) 左右拱命：左輔/右弼 在命三方四正
+  // 5) 左右拱命
   if (hasMinorAny("左辅", "右弼") || hasAny("左辅", "右弼")) {
     if ((min.has("左辅") || maj.has("左辅")) && (min.has("右弼") || maj.has("右弼"))) out.push("左右拱命（左輔右弼齊會）");
     else out.push("左右拱命（左/右之一會命）");
   }
 
-  // 6) 魁鉞拱命：天魁/天鉞 在命三方四正
+  // 6) 魁鉞拱命
   if (hasMinorAny("天魁", "天钺") || hasAny("天魁", "天钺")) {
     if ((min.has("天魁") || maj.has("天魁")) && (min.has("天钺") || maj.has("天钺"))) out.push("魁鉞拱命（天魁天鉞齊會）");
     else out.push("魁鉞拱命（魁/鉞之一會命）");
   }
 
-  // 7) 祿馬交馳（程式提醒版）：祿存 + 天马 同在命三方四正
+  // 7) 祿馬交馳
   if ((min.has("禄存") || maj.has("禄存")) && (min.has("天马") || maj.has("天马"))) out.push("祿馬交馳（祿存+天馬會命三方四正）");
 
-  // 8) 火貪 / 鈴貪（程式版）：貪狼同宮遇火星/鈴星（檢查全盤每宮）
+  // 8) 火貪 / 鈴貪
   {
     const pals = astrolabe?.palaces || [];
     for (const p of pals) {
@@ -443,14 +685,14 @@ function detectPatterns({
     }
   }
 
-  // 9) 化忌入命/官/財/遷（規則提醒）：忌落這幾個宮
+  // 9) 化忌入命/官/財/遷（提醒）
   if (mutagenList) {
     const [, , , j] = mutagenList;
     const palJ = findStarPalace(natalStarsAll, j);
     if (["命宫", "官禄", "财帛", "迁移"].includes(palJ)) out.push(`化忌重點（忌=${j}落${palJ}）`);
   }
 
-  // 10) 雙祿（提醒版）：禄存 + 化禄 同在命三方四正（需 mutagenList）
+  // 10) 雙祿（提醒）
   if (mutagenList) {
     const [l] = mutagenList;
     const palL = findStarPalace(natalStarsAll, l);
@@ -458,26 +700,26 @@ function detectPatterns({
     if (hasLuCun && tfPalaceNames.includes(palL)) out.push(`雙祿（祿存會化祿：化禄=${l}落${palL}）`);
   }
 
-  // 11) 日月同照（簡化）：太陽+太陰 都在命三方四正
+  // 11) 日月同照（簡化）
   if (hasAll("太阳", "太阴")) out.push("日月同照（太陽太陰同會命三方四正）");
 
-  // 12) 紫微系提醒：紫微會命三方四正
+  // 12) 紫微系提醒
   if (maj.has("紫微")) out.push("紫微入局（紫微會命三方四正）");
 
-  // 13) 天府系提醒：天府會命三方四正
+  // 13) 天府系提醒
   if (maj.has("天府")) out.push("天府入局（天府會命三方四正）");
 
-  // 14) 殺破狼提醒：七殺/破軍/貪狼 會命三方四正
+  // 14) 殺破狼提醒
   {
     const sp = ["七杀", "破军", "贪狼"].filter((x) => maj.has(x));
     if (sp.length >= 2) out.push(`殺破狼（${sp.join("、")}會命三方四正）`);
     else if (sp.length === 1) out.push(`殺系入局（${sp[0]}會命三方四正）`);
   }
 
-  // 15) 昌曲齊會（提醒版）
+  // 15) 昌曲齊會
   if ((min.has("文昌") || maj.has("文昌")) && (min.has("文曲") || maj.has("文曲"))) out.push("昌曲齊會（文昌文曲同會）");
 
-  // 16) 左右魁鉞齊（提醒版）
+  // 16) 左右魁鉞齊
   {
     const l = min.has("左辅") || maj.has("左辅");
     const r = min.has("右弼") || maj.has("右弼");
@@ -486,7 +728,7 @@ function detectPatterns({
     if (l && r && (k || y)) out.push("左右魁鉞（左右+魁/鉞加會）");
   }
 
-  // 17) 空劫沖破（提醒版）
+  // 17) 空劫沖破
   {
     const hasKong = hasMinorAny("地空") || hasAdjAny("天空");
     const hasJie = hasMinorAny("地劫");
@@ -495,20 +737,20 @@ function detectPatterns({
     else if (hasJie) out.push("見劫（地劫會命三方四正）");
   }
 
-  // 18) 羊陀火鈴（提醒版）
+  // 18) 羊陀火鈴
   {
     const sha = ["擎羊", "陀罗", "火星", "铃星"].filter((x) => min.has(x) || maj.has(x) || adj.has(x));
     if (sha.length >= 2) out.push(`煞曜夾/會（${sha.slice(0, 4).join("、")}）`);
   }
 
-  // 19) 化祿入財（提醒版）
+  // 19) 化祿入財
   if (mutagenList) {
     const [l] = mutagenList;
     const palL = findStarPalace(natalStarsAll, l);
     if (palL === "财帛") out.push(`化祿入財（禄=${l}落财帛）`);
   }
 
-  // 20) 化權入官（提醒版）
+  // 20) 化權入官
   if (mutagenList) {
     const [, q] = mutagenList;
     const palQ = findStarPalace(natalStarsAll, q);
@@ -543,7 +785,6 @@ document.querySelector("#app").innerHTML = `
     --chat-primary: #8f7cff;          /* main purple */
     --chat-primary-bg: rgba(143,124,255,0.18);
     --chat-primary-border: rgba(143,124,255,0.45);
-
   }
 
   .wrap{
@@ -559,7 +800,6 @@ document.querySelector("#app").innerHTML = `
     box-shadow: 0 16px 40px rgba(0,0,0,0.45);
   }
 
-  /* Mobile: edge-to-edge feel */
   @media (max-width: 520px){
     .wrap{
       margin:0;
@@ -654,7 +894,7 @@ document.querySelector("#app").innerHTML = `
 
   input, select, textarea, button{
     font-family:inherit;
-    font-size:16px; /* iOS: prevent zoom on focus */
+    font-size:16px;
   }
 
   .field{
@@ -669,16 +909,9 @@ document.querySelector("#app").innerHTML = `
     background:#12141b;
   }
 
-  /* Make Label + Birthday shorter (not full width) */
-  #label, #date {
-    width: 96%;
-    margin-right: auto;
-  }
+#label { width: 96%; margin-right: auto; }
 @media (max-width: 520px){
-  #label, #date {
-    width: 91%;
-    margin-right: auto;
-  }
+  #label { width: 91%; margin-right: auto; }
 }
 
   .row2{
@@ -748,15 +981,27 @@ document.querySelector("#app").innerHTML = `
     line-height:1.35;
   }
 
-/* Tabs */
-.tabs{
+  .tabs{
   display:flex;
+  align-items:center;
   gap:8px;
   margin-top:10px;
 }
-.tabBtn{
-  flex:1;
-  padding:10px 12px;
+.tabsRight{
+  justify-content:flex-end;
+  margin-left:auto;           /* ✅ pushes Chart+Data to the right, Ask stays left */
+}
+
+.tabHalf{
+  flex:0 0 auto;              /* ✅ not full width */
+  padding:8px 10px;           /* ✅ smaller */
+  font-size:13px;             /* ✅ smaller text */
+  min-width:92px;             /* ✅ “about half width” feel */
+}
+
+  .tabBtn{
+  flex:0 0 auto;          /* don't auto-stretch */
+  padding:8px 10px;       /* default small */
   border-radius:999px;
   border:1px solid var(--border2);
   background:#0f1117;
@@ -764,91 +1009,68 @@ document.querySelector("#app").innerHTML = `
   font-weight:900;
   cursor:pointer;
 }
-.tabBtn.active{
-  background: rgba(140,120,255,0.14);
-  border-color: rgba(140,120,255,0.32);
-  color:#fff;
-}
-/* ===================== */
-/* Primary Chat Tab      */
-/* ===================== */
-
-.tabBtn.chatPrimary {
-  background: rgba(143,124,255,0.22);
-  border-color: rgba(143,124,255,0.55);
-  color: #ffffff;
-  box-shadow:
-    0 0 0 1px rgba(143,124,255,0.35),
-    0 6px 18px rgba(143,124,255,0.25);
-  font-weight: 900;
-}
-
-.tabBtn.chatPrimary:hover {
-  background: rgba(143,124,255,0.32);
-  border-color: rgba(143,124,255,0.75);
-}
-
-.tabBtn.chatPrimary.active {
-  background: rgba(143,124,255,0.38);
-  border-color: rgba(143,124,255,0.9);
-  box-shadow:
-    0 0 0 1px rgba(143,124,255,0.6),
-    0 8px 22px rgba(143,124,255,0.35);
-}
-/* ===================== */
-/* Chat layout & bubbles */
-/* ===================== */
-
-#paneChat {
-  text-align: left;
-}
-
-.chatLog {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  align-items: stretch;   /* prevents centering */
-  text-align: left;
-}
-
-.chatBubble {
-  max-width: 92%;
-  padding: 10px 12px;
-  border-radius: 14px;
-  border: 1px solid rgba(255,255,255,0.12);
-  background: #0f1117;
-  line-height: 1.35;
-  white-space: pre-wrap;
-  text-align: left;
-}
-
-.chatBubble.user {
-  margin-left: auto;
-}
-
-.chatBubble.assistant {
-  margin-right: auto;
-}
-.chatRow{
-  display:flex;
-}
-.chatRow.user{ justify-content:flex-end; }
-.chatRow.assistant{ justify-content:flex-start; }
-
-.chatMeta{
-  font-size:12px;
-  opacity:0.75;
-  font-weight:900;
-  margin-bottom:6px;
-}
-.chatText{
-  white-space:pre-wrap;
+#tabChat{
+  padding:10px 14px;      /* Ask slightly bigger */
+  min-width:160px;
+  margin-right:auto;      /* ✅ THIS is what left-justifies Ask */
 }
 
 
-  .tabPane{
-    margin-top:10px;
+
+  .tabBtn.active{
+    background: rgba(140,120,255,0.14);
+    border-color: rgba(140,120,255,0.32);
+    color:#fff;
   }
+
+  .tabBtn.chatPrimary {
+    background: rgba(143,124,255,0.22);
+    border-color: rgba(143,124,255,0.55);
+    color: #ffffff;
+    box-shadow:
+      0 0 0 1px rgba(143,124,255,0.35),
+      0 6px 18px rgba(143,124,255,0.25);
+    font-weight: 900;
+  }
+  .tabBtn.chatPrimary:hover {
+    background: rgba(143,124,255,0.32);
+    border-color: rgba(143,124,255,0.75);
+  }
+  .tabBtn.chatPrimary.active {
+    background: rgba(143,124,255,0.38);
+    border-color: rgba(143,124,255,0.9);
+    box-shadow:
+      0 0 0 1px rgba(143,124,255,0.6),
+      0 8px 22px rgba(143,124,255,0.35);
+  }
+
+  #paneChat { text-align: left; }
+  .chatLog{
+    display:flex;
+    flex-direction:column;
+    gap:10px;
+    align-items:stretch;
+    text-align:left;
+  }
+  .chatBubble{
+    max-width:92%;
+    padding:10px 12px;
+    border-radius:14px;
+    border:1px solid rgba(255,255,255,0.12);
+    background:#0f1117;
+    line-height:1.35;
+    white-space:pre-wrap;
+    text-align:left;
+  }
+  .chatBubble.user{ margin-left:auto; }
+  .chatBubble.assistant{ margin-right:auto; }
+  .chatRow{ display:flex; }
+  .chatRow.user{ justify-content:flex-end; }
+  .chatRow.assistant{ justify-content:flex-start; }
+  .chatMeta{ font-size:12px; opacity:0.75; font-weight:900; margin-bottom:6px; }
+  .chatText{ white-space:pre-wrap; }
+
+  .tabPane{ margin-top:10px; }
 
   .copyRow{
     display:flex;
@@ -881,8 +1103,6 @@ document.querySelector("#app").innerHTML = `
     font-size:13px;
     line-height:1.35;
   }
-
-  /* Confirm modal + toast unchanged */
 </style>
 
 <div class="wrap">
@@ -894,19 +1114,18 @@ document.querySelector("#app").innerHTML = `
       <img id="appLogo" class="logo" alt="紫微斗數" />
       <div>
         <h2 class="hTitle">紫微斗數排盤</h2>
-        <p class="hSub">結構化摘要（貼給 ChatGPT）</p>
       </div>
     </div>
 
     <!-- STEP 1 -->
     <div class="stepTitleRow">
       <span class="stepBadge">1</span>
-      <h3 class="stepTitle">命主</h3>
+      <h3 class="stepTitle">命主 (Profile)</h3>
     </div>
 
     <div style="display:flex; flex-direction:column; gap:12px">
       <div>
-        <label class="label">選擇命主資料</label>
+        <label class="label">選擇命主資料 (Select Profile)</label>
         <div class="pickWrap">
           <select id="pick" class="field" style="padding-right:94px"></select>
           <button id="deletePick" class="deleteBtn" disabled>Delete</button>
@@ -920,12 +1139,21 @@ document.querySelector("#app").innerHTML = `
       </div>
 
       <div class="panel">
-        <div style="font-weight:900; margin-bottom:10px; color:#fff">建立新命主資料</div>
+        <div style="font-weight:900; margin-bottom:10px; color:#fff">建立新命主資料 (Enter New Profile)</div>
 
-        <div class="row2">
-          <input id="label" class="field" placeholder="Label (e.g. Son)" />
-          <input id="date" class="field" placeholder="YYYY-MM-DD" />
-        </div>
+<div class="row2">
+  <input id="label" class="field" placeholder="Profile Name (e.g. Son)" />
+  <!-- ✅ NEW instruction line under Profile Name -->
+  <div class="hint" style="margin-top:6px">
+    請輸入出生年份、月份、日期和小時 (Enter birth year, month, day and hour)
+  </div>
+  <div style="display:grid; grid-template-columns: 1.2fr 1fr 1fr; gap:10px;">
+    <select id="dobYear" class="field"></select>
+    <select id="dobMonth" class="field"></select>
+    <select id="dobDay" class="field"></select>
+  </div>
+</div>
+
 
         <div class="row3">
           <select id="shichen" class="field">
@@ -960,32 +1188,27 @@ document.querySelector("#app").innerHTML = `
     <!-- STEP 2 -->
     <div class="stepTitleRow">
       <span class="stepBadge">2</span>
-      <h3 class="stepTitle">選擇分析時間範圍</h3>
+      <h3 class="stepTitle">選擇分析時間範圍 (Select Timeframe)</h3>
     </div>
 
     <div class="panel">
       <label style="display:flex; align-items:center; justify-content:flex-start; gap:10px; margin:8px 0; font-weight:700">
-
         <input type="radio" name="mode" value="life" checked />
         Option 1: 人生整體運勢
       </label>
       <label style="display:flex; align-items:center; justify-content:flex-start; gap:10px; margin:8px 0; font-weight:700">
-
         <input type="radio" name="mode" value="decadal" />
         Option 2: 大限
       </label>
       <label style="display:flex; align-items:center; justify-content:flex-start; gap:10px; margin:8px 0; font-weight:700">
-
         <input type="radio" name="mode" value="year" />
         Option 3: 流年
       </label>
       <label style="display:flex; align-items:center; justify-content:flex-start; gap:10px; margin:8px 0; font-weight:700">
-
         <input type="radio" name="mode" value="month" />
         Option 4: 流月
       </label>
       <label style="display:flex; align-items:center; justify-content:flex-start; gap:10px; margin:8px 0; font-weight:700">
-
         <input type="radio" name="mode" value="date" />
         Option 5: 流日
       </label>
@@ -1011,30 +1234,26 @@ document.querySelector("#app").innerHTML = `
       <input id="target" class="field" placeholder="YYYY-MM-DD" />
     </div>
 
+
     <!-- STEP 3 -->
     <div class="stepTitleRow">
       <span class="stepBadge">3</span>
       <div>
-        <h3 class="stepTitle" style="margin:0">What would you like to know</h3>
-        <div style="margin-top:4px; color:rgba(255,255,255,0.75); font-size:13px">
-          你想了解什麼？
-        </div>
+        <h3 class="stepTitle" style="margin:0">你想了解什麼？ (What would you like to know?)</h3>
+        
       </div>
     </div>
 
-    <!-- Tabs -->
-    <div class="tabs">
-      <button id="tabChat" class="tabBtn chatPrimary active" type="button">Chat</button>
-      <button id="tabData" class="tabBtn" type="button">Data</button>
-    </div>
+<div class="tabs tabsRight">
+  <button id="tabChat" class="tabBtn chatPrimary active" type="button">Ask</button>
+  <button id="tabChart" class="tabBtn tabHalf" type="button">Chart</button>
+  <button id="tabData" class="tabBtn tabHalf" type="button">Data</button>
+</div>
 
-<!-- Chat Tab -->
+
+    <!-- Chat Tab -->
 <div id="paneChat" class="tabPane">
-
-  <!-- Context (still used by your Data packet) -->
-  
-  <!-- Credit meter -->
-  <div style="display:flex;justify-content:flex-end;margin-top:8px">
+  <div style="display:flex;justify-content:flex-end;align-items:center;margin-top:8px;gap:10px;flex-wrap:wrap">
     <div id="creditMeter" style="
       font-size:12px;
       color:rgba(255,255,255,0.72);
@@ -1045,17 +1264,23 @@ document.querySelector("#app").innerHTML = `
       font-weight:900;
     ">Credit: 0%</div>
   </div>
-  
+
   <!-- Composer -->
   <div style="margin-top:10px; display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap">
     <textarea id="chatInput" rows="2" class="field" style="flex:1; min-width:220px"
       placeholder="Ask a question… (e.g., 這次比賽策略？/ 今年升學？/ 感情？)"></textarea>
 
-    <button id="chatSend" class="saveBtn" style="width:auto; padding:11px 16px">Send</button>
-    <button id="chatClear" class="saveBtn" style="width:auto; padding:11px 16px; background:#222; border-color:#444">New Topic / 清空重新開始</button>
+    <button id="chatSendZh" class="saveBtn" style="width:auto; padding:11px 16px">
+      中文回答
+    </button>
+
+    <button id="chatSendEn" class="saveBtn" style="width:auto; padding:11px 16px">
+      Answer in English
+    </button>
+
   </div>
-  
-  <!-- Chat log -->
+
+  <!-- Log -->
   <div id="chatLog" style="
     margin-top:10px;
     border:1px solid rgba(255,255,255,0.10);
@@ -1070,24 +1295,44 @@ document.querySelector("#app").innerHTML = `
     gap:10px;
   "></div>
 
-<div id="chatStatus" class="hint" style="margin-top:8px">
-  Tip: mode changes regenerate Data and will auto-refresh the last assistant reply.<br>
-  <span style="opacity:0.85">
-    換話題建議先清空（New Topic），回答會更準
-  </span>
-</div>
+  <!-- New Topic bottom-right under response box -->
+  <div style="display:flex; justify-content:flex-end; margin-top:10px">
+    <button id="chatClear" class="saveBtn"
+      style="width:auto; padding:9px 12px; background:#222; border-color:#444; font-size:13px">
+      New Topic / 清空重新開始
+    </button>
+  </div>
 
+  <div id="chatStatus" class="hint" style="margin-top:8px">
+    Tip: mode changes regenerate Data and will auto-refresh the last assistant reply.
+    <br>
+    <span style="opacity:0.85">換話題建議先清空（New Topic），回答會更準</span>
+  </div>
 </div>
 
 
     <!-- Data Tab -->
-    <div id="paneData" class="tabPane" style="display:none">
-      <div class="copyRow">
-        <button id="copy" class="copyBtn">Copy for ChatGPT</button>
-      </div>
+<div id="paneData" class="tabPane" style="display:none">
+  <div class="copyRow">
+    <button id="copy" class="copyBtn">Copy Data Packet</button>
+  </div>
+  <pre id="out"></pre>
+</div>
 
-      <pre id="out"></pre>
-    </div>
+   <!-- Chart Tab -->
+<div id="paneChart" class="tabPane" style="display:none">
+  <div class="hint" style="margin-top:6px">
+    Traditional 12-palace view (本命盤). Shows 宮名 / 天干地支 / 大限range / 星曜.
+  </div>
+
+  <div id="chartGrid" style="
+    margin-top:10px;
+    display:grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap:10px;
+  "></div>
+</div>
+
   </div>
 
   <!-- Confirm delete modal -->
@@ -1142,6 +1387,7 @@ document.querySelector("#app").innerHTML = `
     box-shadow:0 10px 30px rgba(0,0,0,0.6);
     font-weight:900;
   ">Selected chart deleted!</div>
+
   <!-- Footer -->
   <div style="
     margin-top:16px;
@@ -1153,8 +1399,7 @@ document.querySelector("#app").innerHTML = `
   ">
     Ziwei Helper · <span id="appVersion"></span>
   </div>
-
-  </div>
+</div>
 `;
 
 /**
@@ -1173,7 +1418,6 @@ if (logoImg) {
 const versionEl = document.getElementById("appVersion");
 if (versionEl) versionEl.textContent = APP_VERSION;
 
-
 /* ========= DOM ========= */
 const out = document.getElementById("out");
 const pick = document.getElementById("pick");
@@ -1182,9 +1426,13 @@ const confirmModal = document.getElementById("confirmModal");
 const confirmYes = document.getElementById("confirmYes");
 const confirmNo = document.getElementById("confirmNo");
 const toast = document.getElementById("toast");
-
+const tabChart = document.getElementById("tabChart");
+const paneChart = document.getElementById("paneChart");
+const chartGridEl = document.getElementById("chartGrid");
 const label = document.getElementById("label");
-const date = document.getElementById("date");
+const dobYear = document.getElementById("dobYear");
+const dobMonth = document.getElementById("dobMonth");
+const dobDay = document.getElementById("dobDay");
 const gender = document.getElementById("gender");
 const monthInput = document.getElementById("month");
 const target = document.getElementById("target");
@@ -1194,7 +1442,6 @@ const rowDecadal = document.getElementById("row-decadal");
 const rowYear = document.getElementById("row-year");
 const rowMonth = document.getElementById("row-month");
 const rowDate = document.getElementById("row-date");
-
 const tabChat = document.getElementById("tabChat");
 const tabData = document.getElementById("tabData");
 const paneChat = document.getElementById("paneChat");
@@ -1203,10 +1450,11 @@ const paneData = document.getElementById("paneData");
 let profiles = loadProfiles();
 let lastPacket = "";
 let toastTimer = null;
+
 /* ========= Chat + Cost Tracking ========= */
 
 // Local chat storage
-const CHAT_KEY = "zw_chat_sessions_v1";
+const CHAT_KEY = "zw_chat_sessions_v2"; // bumped since schema changed (lang per message)
 const COST_KEY = "zw_cost_v1";
 
 function loadChatStore() {
@@ -1223,29 +1471,31 @@ function saveCost(c) {
   localStorage.setItem(COST_KEY, JSON.stringify(c));
 }
 
-// Pricing: update these if you want more accurate estimates.
-// (Placeholders; safe defaults.)
-const COST_PER_1M_INPUT = 0.20;   // USD per 1M input tokens (placeholder)
-const COST_PER_1M_OUTPUT = 0.80;  // USD per 1M output tokens (placeholder)
+// Pricing: tweak anytime
+const COST_PER_1M_INPUT = 0.20;
+const COST_PER_1M_OUTPUT = 0.80;
 const CREDIT_USD = 10.0;
 
 // UI elems (exist after template render)
 const chatLogEl = document.getElementById("chatLog");
 const chatInputEl = document.getElementById("chatInput");
-const chatSendBtn = document.getElementById("chatSend");
+const chatSendEnBtn = document.getElementById("chatSendEn");
+const chatSendZhBtn = document.getElementById("chatSendZh");
 const chatClearBtn = document.getElementById("chatClear");
 const chatStatusEl = document.getElementById("chatStatus");
 const creditMeterEl = document.getElementById("creditMeter");
 
 function currentSessionKey() {
-  // Session is per: selected profile + mode + targetStr (so year/month/date changes become a new session)
-  const idx = Number(pick.value);
+  // IMPORTANT: placeholder option has value="" — must not coerce to 0
+  const raw = (pick.value ?? "");
+  if (raw === "") return "no_profile";
+
+  const idx = Number(raw);
   const p = Number.isFinite(idx) ? profiles[idx] : null;
   if (!p) return "no_profile";
 
   const mode = getSelectedMode();
 
-  // Mirror your target selection logic
   let t = "";
   if (mode === "life") t = "life";
   else if (mode === "decadal") t = decadalPick?.selectedOptions?.[0]?.dataset?.date || "";
@@ -1253,12 +1503,7 @@ function currentSessionKey() {
   else if (mode === "month") t = (monthInput?.value || "").trim();
   else t = (target?.value || "").trim();
 
-  return [
-    "p",
-    p.label, p.date, String(p.time), p.gender,
-    "mode", mode,
-    "t", t || "(unset)"
-  ].join("|");
+  return ["p", p.label, p.date, String(p.time), p.gender, "mode", mode, "t", t || "(unset)"].join("|");
 }
 
 function getSessionMessages() {
@@ -1270,14 +1515,10 @@ function getSessionMessages() {
 function setSessionMessages(msgs) {
   const store = loadChatStore();
   const key = currentSessionKey();
-
-  // 🔒 HARD CAP: keep only the last 40 messages
   const capped = Array.isArray(msgs) ? msgs.slice(-40) : [];
-
   store[key] = capped;
   saveChatStore(store);
 }
-
 
 function escapeHtml(s) {
   return String(s)
@@ -1288,6 +1529,7 @@ function escapeHtml(s) {
 
 function renderChat() {
   if (!chatLogEl) return;
+
   const msgs = getSessionMessages();
 
   if (!msgs.length) {
@@ -1299,18 +1541,18 @@ function renderChat() {
   }
 
   chatLogEl.className = "chatLog";
-
   chatLogEl.innerHTML = msgs
     .map((m) => {
       const isUser = m.role === "user";
-      const label = isUser ? "You" : "Assistant";
+      const labelTxt = isUser ? "You" : (m.lang === "en" ? "Assistant (EN)" : "Assistant (中文)");
       const roleClass = isUser ? "user" : "assistant";
+      const shown = m.content || "";
 
       return `
         <div class="chatRow ${roleClass}">
           <div class="chatBubble ${roleClass}">
-            <div class="chatMeta">${label}</div>
-            <div class="chatText">${escapeHtml(m.content)}</div>
+            <div class="chatMeta">${labelTxt}</div>
+            <div class="chatText">${escapeHtml(shown).replaceAll("\n", "<br>")}</div>
           </div>
         </div>
       `;
@@ -1320,15 +1562,14 @@ function renderChat() {
   chatLogEl.scrollTop = chatLogEl.scrollHeight;
 }
 
-
 function setChatStatus(text) {
-  if (chatStatusEl) chatStatusEl.textContent = text;
+  if (!chatStatusEl) return;
+  chatStatusEl.innerHTML = escapeHtml(text).replaceAll("\n", "<br>");
 }
 
 function updateCreditUI() {
   const c = loadCost();
-  // rollovers simulate "rebill when cross $10"
-  const spendThisCycle = c.usd % CREDIT_USD;
+  const spendThisCycle = (c.usd || 0) % CREDIT_USD;
   const pct = Math.min(100, Math.round((spendThisCycle / CREDIT_USD) * 100));
   if (creditMeterEl) creditMeterEl.textContent = `Credit: ${pct}%`;
 }
@@ -1336,7 +1577,6 @@ function updateCreditUI() {
 function addUsageCost(usage) {
   if (!usage || typeof usage !== "object") return;
 
-  // Responses API usage can be: { input_tokens, output_tokens, total_tokens }
   const inputTokens = Number(usage.input_tokens || 0);
   const outputTokens = Number(usage.output_tokens || 0);
 
@@ -1348,9 +1588,9 @@ function addUsageCost(usage) {
   const before = c.usd || 0;
   const after = before + usd;
 
-  // rollover counting (optional)
   const beforeCycles = Math.floor(before / CREDIT_USD);
   const afterCycles = Math.floor(after / CREDIT_USD);
+
   c.usd = after;
   c.rollovers = (c.rollovers || 0) + Math.max(0, afterCycles - beforeCycles);
 
@@ -1358,25 +1598,24 @@ function addUsageCost(usage) {
   updateCreditUI();
 }
 
-async function callGpt(messages) {
+async function callGpt(messages, outputLanguage = "zh") {
   const resp = await fetch("/.netlify/functions/openai-chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       model: "gpt-4.1-mini",
       contextPacket: lastPacket || "",
+      outputLanguage, // "zh" | "en"
       messages,
     }),
   });
 
   const raw = await resp.text();
 
-  // ✅ Better error extraction (shows the real reason)
   if (!resp.ok) {
     let msg = raw;
     try {
       const j = JSON.parse(raw);
-      // prefer OpenAI detail; fallback to {error}
       msg = j?.detail
         ? (typeof j.detail === "string" ? j.detail : JSON.stringify(j.detail))
         : (j?.error || raw);
@@ -1384,14 +1623,66 @@ async function callGpt(messages) {
     throw new Error(msg);
   }
 
-  const data = JSON.parse(raw);
-  return data; // { text, usage }
+  return JSON.parse(raw); // { text, usage }
+}
+
+// EN instruction: "everyday English, no Ziwei jargon"
+function englishPlainSystemPrompt() {
+  return {
+    role: "system",
+    content: `
+You are giving a life reading based on timing, patterns, and symbolic influences.
+This is NOT technical analysis and NOT consulting language.
+
+ENGLISH STYLE RULES (VERY IMPORTANT):
+- Write like a human fortune reading, not a report.
+- Avoid business, academic, or consulting language entirely.
+- Do NOT use phrases like "pricing strategy", "resource optimization", "leverage points", or "managing X strategies".
+- Use natural, everyday wording that sounds spoken, warm, and intuitive.
+- Short paragraphs. Gentle tone. Easy to read.
+
+VOCABULARY TRANSLATION RULES:
+- Money-related influences → talk about money flow, financial pressure, stability, or strain (NOT pricing or strategy).
+- Career-related influences → talk about direction, responsibilities, workload, or recognition.
+- Relationship influences → talk about trust, expectations, emotional distance, or support.
+- Health-related influences → talk about energy levels, stress, recovery, or feeling worn down.
+
+ALLOWED SYMBOLIC LANGUAGE:
+- You MAY say things like:
+  - "the stars around money suggest..."
+  - "this phase of life highlights..."
+  - "there is a pull between responsibility and freedom..."
+- Do NOT explain astrology mechanics or palace systems.
+- Do NOT translate Ziwei terms word-for-word.
+
+CONTENT RULES:
+- Preserve the fortune-telling feeling.
+- Focus on themes, pressures, and likely experiences.
+- Emphasize what feels heavy, what feels supportive, and where the person still has room to breathe.
+- Avoid sounding instructional or prescriptive.
+
+CHINESE RESPONSES ARE NOT AFFECTED BY THIS PROMPT.
+This prompt applies ONLY when responding in English.
+`.trim(),
+  };
 }
 
 
-// Send a user message and get assistant reply
+
+
+
+// ZH instruction: keep current style
+function chineseSystemPrompt() {
+  return {
+    role: "system",
+    content:
+      "請用繁體中文回答。可以使用紫微斗數常用術語，但表達要清楚、口語、好理解。避免過度玄學化，給出可執行的建議。",
+  };
+}
+
 let isSending = false;
-async function sendChatMessage(userText) {
+
+async function sendChatMessage(userText, lang /* "zh" | "en" */) {
   if (isSending) return;
   const text = (userText || "").trim();
   if (!text) return;
@@ -1403,20 +1694,38 @@ async function sendChatMessage(userText) {
   }
 
   isSending = true;
-  setChatStatus("Sending…");
+  setChatStatus(lang === "en" ? "Sending (English)..." : "Sending (中文)...");
 
   const msgs = getSessionMessages();
+
+  // push user
   msgs.push({ role: "user", content: text });
   setSessionMessages(msgs);
   renderChat();
 
   try {
-    const data = await callGpt(msgs);
-    const reply = (data?.text || "").trim() || "(no response)";
-    msgs.push({ role: "assistant", content: reply });
-    setSessionMessages(msgs);
+    // add system instruction just for this request
+    const sys = lang === "en" ? englishPlainSystemPrompt() : chineseSystemPrompt();
+    const payloadMsgs = [sys, ...msgs];
+
+    console.log("SEND LANG =", lang); // ✅ INSERT HERE
+
+    const dataMain = await callGpt(payloadMsgs, lang);
+    const replyMain = (dataMain?.text || "").trim() || "(no response)";
+
+    const assistantMsg = {
+      role: "assistant",
+      lang,
+      content: replyMain,
+      at: Date.now(),
+    };
+
+    const msgs2 = getSessionMessages(); // re-read (in case)
+    msgs2.push(assistantMsg);
+    setSessionMessages(msgs2);
+
     renderChat();
-    addUsageCost(data?.usage);
+    addUsageCost(dataMain?.usage);
     setChatStatus("Done.");
   } catch (e) {
     setChatStatus("GPT call failed.");
@@ -1426,51 +1735,60 @@ async function sendChatMessage(userText) {
   }
 }
 
-// Auto-refresh last assistant reply when packet changes
+/**
+ * Auto-refresh last assistant reply when mode/target/context changes.
+ * Refreshes in the SAME language as the last assistant message.
+ */
 let autoRefreshTimer = null;
+
 async function autoRefreshLastAssistant() {
   if (isSending) return;
 
   const msgs = getSessionMessages();
   if (!msgs.length) return;
 
-  // Need at least: user -> assistant (or just user)
   const lastUserIdx = (() => {
     for (let i = msgs.length - 1; i >= 0; i--) if (msgs[i].role === "user") return i;
     return -1;
   })();
   if (lastUserIdx < 0) return;
 
-  // Recompute assistant answer to the last user message using updated packet,
-  // replacing the last assistant message if it exists after that user turn.
+  const lastAssistant = (() => {
+    for (let i = msgs.length - 1; i >= 0; i--) if (msgs[i].role === "assistant") return msgs[i];
+    return null;
+  })();
+  if (!lastAssistant) return;
+
+  const lang = lastAssistant.lang === "en" ? "en" : "zh";
   const cut = msgs.slice(0, lastUserIdx + 1);
 
   isSending = true;
-  setChatStatus("Mode changed: refreshing answer with updated Data…");
+  setChatStatus("Mode/target/context changed: refreshing last answer…");
 
   try {
-    const data = await callGpt(cut);
+    const suffix = "\n\n(Updated due to mode/target/context change)";
+
+    const sys = lang === "en" ? englishPlainSystemPrompt() : chineseSystemPrompt();
+    const payloadMsgs = [sys, ...cut];
+
+    console.log("AUTO REFRESH LANG =", lang);
+
+    const data = await callGpt(payloadMsgs, lang);
     const reply = (data?.text || "").trim() || "(no response)";
 
-    // If last message is assistant, replace it; else append.
-    let newMsgs = msgs.slice();
-    const lastIsAssistant = newMsgs.length && newMsgs[newMsgs.length - 1].role === "assistant";
+    const newMsgs = msgs.slice();
+    const lastIdx = newMsgs.length - 1;
 
-    if (lastIsAssistant) {
-      newMsgs[newMsgs.length - 1] = {
-        role: "assistant",
-        content: reply + "\n\n(Updated due to mode/target/context change)",
-      };
+    if (newMsgs[lastIdx] && newMsgs[lastIdx].role === "assistant") {
+      newMsgs[lastIdx] = { ...newMsgs[lastIdx], lang, content: reply + suffix };
     } else {
-      newMsgs.push({
-        role: "assistant",
-        content: reply + "\n\n(Updated due to mode/target/context change)",
-      });
+      newMsgs.push({ role: "assistant", lang, content: reply + suffix, at: Date.now() });
     }
 
     setSessionMessages(newMsgs);
     renderChat();
     addUsageCost(data?.usage);
+
     setChatStatus("Updated.");
   } catch (e) {
     setChatStatus("Auto-refresh failed.");
@@ -1487,16 +1805,22 @@ function scheduleAutoRefresh(ms = 250) {
   }, ms);
 }
 
-/* ===== ADD THIS RIGHT HERE (IMMEDIATELY AFTER scheduleAutoRefresh) ===== */
-
-// Chat send / clear
-chatSendBtn.onclick = () => {
+// Buttons
+chatSendEnBtn.onclick = () => {
   const text = (chatInputEl.value || "").trim();
   if (!text) return;
   chatInputEl.value = "";
-  sendChatMessage(text);
+  sendChatMessage(text, "en");
 };
 
+chatSendZhBtn.onclick = () => {
+  const text = (chatInputEl.value || "").trim();
+  if (!text) return;
+  chatInputEl.value = "";
+  sendChatMessage(text, "zh");
+};
+
+// New Topic / clear
 chatClearBtn.onclick = () => {
   if (!confirm("Clear chat for this session?")) return;
   setSessionMessages([]);
@@ -1504,24 +1828,32 @@ chatClearBtn.onclick = () => {
   setChatStatus("Cleared.");
 };
 
-// Enter to send (Shift+Enter = newline)
+// Enter key: default to 中文回答 (safer / matches current behavior)
 chatInputEl.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.shiftKey) {
     e.preventDefault();
-    chatSendBtn.click();
+    chatSendZhBtn.click();
   }
 });
 
 /* ========= Tabs ========= */
 function setActiveTab(which) {
   const isChat = which === "chat";
+  const isData = which === "data";
+  const isChart = which === "chart";
+
   tabChat.classList.toggle("active", isChat);
-  tabData.classList.toggle("active", !isChat);
+  tabData.classList.toggle("active", isData);
+  tabChart.classList.toggle("active", isChart);
+
   paneChat.style.display = isChat ? "block" : "none";
-  paneData.style.display = isChat ? "none" : "block";
+  paneData.style.display = isData ? "block" : "none";
+  paneChart.style.display = isChart ? "block" : "none";
 }
 tabChat.onclick = () => setActiveTab("chat");
 tabData.onclick = () => setActiveTab("data");
+tabChart.onclick = () => setActiveTab("chart");
+
 
 /* ========= Delete UI helpers ========= */
 function setDeleteEnabled(enabled) {
@@ -1564,16 +1896,21 @@ function refresh(selectIndex = null) {
   }
 
   pick.innerHTML =
-    `<option value="">(Select a saved chart)</option>` +
+    `<option value="">(Select a saved profile)</option>` +
     profiles.map((p, i) => `<option value="${i}">${p.label} (${p.date}, t=${p.time})</option>`).join("");
 
   if (selectIndex !== null && Number.isFinite(selectIndex) && profiles[selectIndex]) {
     pick.value = String(selectIndex);
     pick.dispatchEvent(new Event("change"));
   } else {
-    pick.value = "";
-    setDeleteEnabled(false);
-  }
+  // ✅ If there are saved profiles, default-select the first one (index 0)
+  pick.value = "0";
+  setDeleteEnabled(true);
+
+  // Trigger the same behavior as a user selection
+  pick.dispatchEvent(new Event("change"));
+}
+
 }
 function updateModeUI() {
   const mode = getSelectedMode();
@@ -1582,7 +1919,11 @@ function updateModeUI() {
   rowMonth.style.display = mode === "month" ? "block" : "none";
   rowDate.style.display = mode === "date" ? "block" : "none";
 }
+
 function rebuildAsksForSelectedProfile() {
+  const raw = (pick.value ?? "");
+  if (raw === "") return;
+
   const idx = Number(pick.value);
   const p = Number.isFinite(idx) ? profiles[idx] : null;
   if (!p) return;
@@ -1592,10 +1933,12 @@ function rebuildAsksForSelectedProfile() {
 
   const yrs = buildYearOptions(p, 80);
   yearPick.innerHTML = yrs.map((y, i) => `<option value="${i}" data-date="${y.date}">${y.label}</option>`).join("");
+
+
 }
 
 /* ========= buildAnalysis / renderHuman / renderPacket ========= */
-function buildAnalysis({ profile, mode, targetStr, targetDate, ctx }) {
+function buildAnalysis({ profile, mode, targetStr, targetDate, ctx, focusPalace }) {
   const a = astro.astrolabeBySolarDate(profile.date, Number(profile.time), profile.gender);
   const natalStarsAll = natalAllStars(a);
   const natalStarsMajor = natalMajorStars(a);
@@ -1657,13 +2000,12 @@ function buildAnalysis({ profile, mode, targetStr, targetDate, ctx }) {
   const decIdx = h ? scopeMingPalaceIndex(h, "decadal") : null;
   const decTF = decIdx === null ? [] : tfNamesByIndex(a, decIdx);
 
-  // patterns: natal always; dominant only one; decadal background only for year/month/date
   const natalPatterns = detectPatterns({
     layerLabel: "本命（基底）",
     astrolabe: a,
     natalStarsAll,
     tfPalaceNames: natalTF,
-    mutagenList: null, // 本命四化星名在 iztro 不一定以 mutagen 提供；不猜 → 先不做三奇等四化型格局
+    mutagenList: null,
   });
 
   const dominantPatterns = dominantScope
@@ -1687,11 +2029,33 @@ function buildAnalysis({ profile, mode, targetStr, targetDate, ctx }) {
         })
       : [];
 
-  // overlay
-  const overlayText =
-    h && dominantScope && Array.isArray(dominantMut)
-      ? overlayNarrativeNatalToScope(a, h, dominantScope, dominantMut)
-      : "（此模式不指定時間點；無層級重疊）";
+  const overlayText = h && dominantScope && Array.isArray(dominantMut) ? overlayNarrativeNatalToScope(a, h, dominantScope, dominantMut) : "（此模式不指定時間點；無層級重疊）";
+
+  // ===== NEW: 因果鏈（focus palace） =====
+  const focus = focusPalace && palaceNames.includes(focusPalace) ? focusPalace : "命宫";
+
+  const natalEdges = buildCausalEdgesFromRows(natalMut, null);
+  const natalCausal = causalSummaryForFocus(natalEdges, focus);
+
+  const dominantEdges = Array.isArray(dominantMut) ? buildCausalEdgesFromRows(dominantMut, dominantMutagenList) : [];
+  const dominantCausal = dominantScope ? causalSummaryForFocus(dominantEdges, focus) : null;
+
+  const bgEdges = Array.isArray(decadalMut) ? buildCausalEdgesFromRows(decadalMut, decadalMutagenList) : [];
+  const bgCausal =
+    h && (mode === "year" || mode === "month" || mode === "date") ? causalSummaryForFocus(bgEdges, focus) : null;
+
+  const timingMonthlyEdges =
+    h && (mode === "month" || mode === "date") && Array.isArray(monthlyMut) ? buildCausalEdgesFromRows(monthlyMut, monthlyMutagenList) : [];
+  const timingMonthlyCausal =
+    timingMonthlyEdges.length ? causalSummaryForFocus(timingMonthlyEdges, focus) : null;
+
+  const timingDailyEdges = h && mode === "date" && Array.isArray(dailyMut) ? buildCausalEdgesFromRows(dailyMut, dailyMutagenList) : [];
+  const timingDailyCausal = timingDailyEdges.length ? causalSummaryForFocus(timingDailyEdges, focus) : null;
+
+  const adjustability =
+    dominantScope && dominantCausal
+      ? buildAdjustabilityPacket({ mode, dominantLabel, focusPalace: focus, dominantCausalSummary: dominantCausal })
+      : buildAdjustabilityPacket({ mode, dominantLabel: null, focusPalace: focus, dominantCausalSummary: { causes: [] } });
 
   return {
     profile,
@@ -1699,6 +2063,7 @@ function buildAnalysis({ profile, mode, targetStr, targetDate, ctx }) {
     targetStr,
     targetDate,
     ctx,
+    focusPalace: focus,
 
     astrolabe: a,
     horoscope: h,
@@ -1712,6 +2077,7 @@ function buildAnalysis({ profile, mode, targetStr, targetDate, ctx }) {
       incomingTop: computeIncomingTop(natalMut),
       prettyStars: prettyNatalStars(natalStarsAll),
       prettyMut: prettyMutagenFlights(natalMut, "本命四化"),
+      causal: natalCausal,
     },
 
     dominant: {
@@ -1721,6 +2087,7 @@ function buildAnalysis({ profile, mode, targetStr, targetDate, ctx }) {
       flow: dominantFlow,
       mutagenList: dominantMutagenList,
       patterns: dominantPatterns,
+      causal: dominantCausal,
     },
 
     backgroundDecadal:
@@ -1730,6 +2097,7 @@ function buildAnalysis({ profile, mode, targetStr, targetDate, ctx }) {
             flow: decadalFlow,
             mutagenList: decadalMutagenList,
             patterns: decadalBgPatterns,
+            causal: bgCausal,
           }
         : null,
 
@@ -1740,6 +2108,7 @@ function buildAnalysis({ profile, mode, targetStr, targetDate, ctx }) {
               mut: monthlyMut,
               flow: monthlyFlow,
               mutagenList: monthlyMutagenList,
+              causal: timingMonthlyCausal,
             },
             daily:
               mode === "date"
@@ -1747,12 +2116,14 @@ function buildAnalysis({ profile, mode, targetStr, targetDate, ctx }) {
                     mut: dailyMut,
                     flow: dailyFlow,
                     mutagenList: dailyMutagenList,
+                    causal: timingDailyCausal,
                   }
                 : null,
           }
         : null,
 
     overlayText,
+    adjustability,
   };
 }
 
@@ -1765,6 +2136,7 @@ function renderHuman(A) {
   L.push(`出生：${p.date}  time_index=${p.time}`);
   L.push(`【模式】${A.mode}`);
   L.push(`【目標】${A.mode === "life" ? "life" : A.targetStr}`);
+
 
   if (h) {
     L.push(`【iztro solarDate】${h?.solarDate || "N/A"}`);
@@ -1782,6 +2154,18 @@ function renderHuman(A) {
       L.push(`【流日命宮落點】${scopeMingPalaceName(A.astrolabe, h, "daily")} (index=${h?.daily?.index ?? "N/A"})`);
     }
   }
+  L.push("");
+
+  // ===== NEW: 可調整性（決策輔助）放前面，讓用戶先看 “怎麼用” =====
+  L.push("【可調整 vs 不可調整（決策輔助）】");
+  L.push(`【不可調整】${A.adjustability?.不可调?.說明 || ""}`);
+  L.push("");
+  L.push("【可調整點（策略槓桿：起因宮）】");
+  const levers = A.adjustability?.可调?.發動宮清單 || [];
+  if (!levers.length) L.push("（無：此模式沒有主導層；或此焦點宮未接到四化）");
+  else L.push(levers.map((x) => `- ${x.宮位}：${x.可操作方向}`).join("\n"));
+  L.push("");
+  L.push(`【節奏管理】${A.adjustability?.节奏?.說明 || ""}`);
   L.push("");
 
   // Natal base
@@ -1804,7 +2188,11 @@ function renderHuman(A) {
   L.push(prettyIncomingTopLine("【本命：四化落點 Top 接收宮位】", A.natal.mut));
   L.push("");
 
-  // Background decadal for year/month/date (include 大限格局 here, labeled background)
+  // ===== NEW: 本命因果鏈（焦點宮）=====
+  L.push(prettyCausalSummary("本命（基底）", A.natal.causal));
+  L.push("");
+
+  // Background decadal for year/month/date
   if (A.backgroundDecadal) {
     L.push("【背景（大限；框架/環境；不作主導）】");
     L.push(prettyPatterns("大限格局（背景；程式規則版）", A.backgroundDecadal.patterns, 12));
@@ -1819,6 +2207,10 @@ function renderHuman(A) {
     L.push("");
 
     L.push(prettyIncomingTopLine("【大限（背景）：四化落點 Top 接收宮位】", A.backgroundDecadal.mut));
+    L.push("");
+
+    // NEW: 背景因果鏈（焦點宮）
+    L.push(prettyCausalSummary("背景（大限）", A.backgroundDecadal.causal));
     L.push("");
 
     if (Array.isArray(A.backgroundDecadal.flow)) {
@@ -1845,6 +2237,10 @@ function renderHuman(A) {
     L.push(prettyIncomingTopLine(`【當前主導（${A.dominant.label}）：四化落點 Top 接收宮位】`, A.dominant.mut));
     L.push("");
 
+    // ===== NEW: 主導因果鏈（焦點宮）=====
+    L.push(prettyCausalSummary(`當前主導（${A.dominant.label}）`, A.dominant.causal));
+    L.push("");
+
     if (Array.isArray(A.dominant.flow)) {
       L.push(`【當前主導（${A.dominant.label}）：流耀（按宮位）】`);
       L.push(prettyFlowStarsByPalace(A.dominant.flow, A.dominant.label));
@@ -1861,6 +2257,11 @@ function renderHuman(A) {
     L.push("【流月四化星名（禄/权/科/忌；落宮）】");
     L.push(prettyMutagenStarNames("流月四化星名", A.timingRef.monthly.mutagenList, A.natal.starsAll));
     L.push("");
+    // NEW: 流月因果鏈（焦點宮）
+    if (A.timingRef.monthly.causal) {
+      L.push(prettyCausalSummary("應期參考（流月）", A.timingRef.monthly.causal));
+      L.push("");
+    }
   }
   if (A.timingRef?.daily) {
     L.push("【應期參考（流日；不作主導；不輸出格局）】");
@@ -1870,6 +2271,11 @@ function renderHuman(A) {
     L.push("【流日四化星名（禄/权/科/忌；落宮）】");
     L.push(prettyMutagenStarNames("流日四化星名", A.timingRef.daily.mutagenList, A.natal.starsAll));
     L.push("");
+    // NEW: 流日因果鏈（焦點宮）
+    if (A.timingRef.daily.causal) {
+      L.push(prettyCausalSummary("應期參考（流日）", A.timingRef.daily.causal));
+      L.push("");
+    }
   }
 
   if (A.mode !== "life") {
@@ -1878,12 +2284,18 @@ function renderHuman(A) {
     L.push("");
   }
 
-
   return L.join("\n");
 }
 
+function isoTodayYMD() {
+  const d = new Date();
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+
 function renderPacket(A) {
-  // “Copy for ChatGPT”: JSON-heavy packet, but follows your dominance rules.
   const lp = [];
   const p = A.profile;
 
@@ -1891,6 +2303,53 @@ function renderPacket(A) {
   lp.push(`出生：${p.date}  time_index=${p.time}`);
   lp.push(`【模式】${A.mode}`);
   lp.push(`【目標】${A.mode === "life" ? "life" : A.targetStr}`);
+  lp.push("");
+
+  // ✅ Time anchor block: forces GPT to interpret “this year/this 大限” as the selected target
+  lp.push("【時間錨點（解析「今年/這個大限/本月/今天」一律以此為準）】");
+  lp.push(
+  JSON.stringify(
+    {
+      selected_mode: A.mode,
+      selected_target_type:
+        A.mode === "decadal" ? "大限" :
+        A.mode === "year" ? "流年" :
+        A.mode === "month" ? "流月" :
+        A.mode === "date" ? "流日" : "本命",
+      selected_target: A.mode === "life" ? "life" : A.targetStr,
+      selected_target_solarDate: A.horoscope?.solarDate || null,
+      selected_target_lunarDate: A.horoscope?.lunarDate || null,
+      dominant_layer: A.dominant?.label || null,
+      note:
+        "使用者若說「今年/this year」→ 指本次選定的【流年】；說「這個大限/this 大限」→ 指本次選定的【大限】；說「本月」→ 指選定的【流月】；說「今天」→ 指選定的【流日】。除非使用者明確說真實日曆當下（例如：2026/now/current year），否則不得混用。",
+      client_today: isoTodayYMD(),
+    },
+    null,
+    2
+  )
+);
+lp.push(""); // ✅ IMPORTANT: separate sections
+
+  // NEW: 可調整性（JSON）
+  lp.push("【可調整性（JSON）】");
+  lp.push(JSON.stringify(A.adjustability, null, 2));
+  lp.push("");
+
+  // NEW: 因果鏈（JSON，focus only）
+  lp.push("【因果鏈（JSON；焦點宮）】");
+  lp.push(
+    JSON.stringify(
+      {
+        本命: A.natal?.causal || null,
+        背景大限: A.backgroundDecadal?.causal || null,
+        當前主導: A.dominant?.causal || null,
+        應期流月: A.timingRef?.monthly?.causal || null,
+        應期流日: A.timingRef?.daily?.causal || null,
+      },
+      null,
+      2
+    )
+  );
   lp.push("");
 
   lp.push("【本命（基底）格局（程式規則版）】");
@@ -1909,7 +2368,6 @@ function renderPacket(A) {
   lp.push(A.natal.self);
   lp.push("");
 
-  // Background decadal for year/month/date
   if (A.backgroundDecadal) {
     lp.push("【背景（大限）格局（程式規則版）】");
     lp.push(JSON.stringify(A.backgroundDecadal.patterns, null, 2));
@@ -1930,7 +2388,6 @@ function renderPacket(A) {
     }
   }
 
-  // Dominant layer
   if (A.dominant.scope) {
     lp.push(`【當前主導（${A.dominant.label}）格局（程式規則版）】`);
     lp.push(JSON.stringify(A.dominant.patterns, null, 2));
@@ -1951,7 +2408,6 @@ function renderPacket(A) {
     }
   }
 
-  // Timing reference tables only (Option B)
   if (A.timingRef?.monthly) {
     lp.push("【應期參考：流月四化（JSON：飞化）】");
     lp.push(JSON.stringify(A.timingRef.monthly.mut, null, 2));
@@ -1975,9 +2431,192 @@ function renderPacket(A) {
     lp.push("");
   }
 
-
   return lp.join("\n");
 }
+function palaceStarsLine(pal) {
+  const major = (pal?.majorStars || []).map((s) => s.name).filter(Boolean);
+  const minor = (pal?.minorStars || []).map((s) => s.name).filter(Boolean);
+  const adj = (pal?.adjectiveStars || []).map((s) => s.name).filter(Boolean);
+
+  const parts = [];
+  if (major.length) parts.push(`主：${major.map(escapeHtml).join("、")}`);
+  if (minor.length) parts.push(`辅/煞：${minor.map(escapeHtml).join("、")}`);
+  if (adj.length) parts.push(`杂：${adj.map(escapeHtml).join("、")}`);
+
+  return parts.join("<br>") || "（無星曜）";
+}
+function buildChartHighlight(A) {
+  // Returns: { tfNames:Set<string>, mingName:string|null }
+  if (!A?.astrolabe?.palaces?.length) return { tfNames: new Set(), mingName: null };
+
+  const a = A.astrolabe;
+  const mode = A.mode;
+  const h = A.horoscope;
+
+  // Which layer to anchor highlights to?
+  // - life => 本命命宮
+  // - decadal => 大限命宮
+  // - year/month/date => 流年命宮（你目前規則：yearly 為主導）
+  let idx = null;
+
+  if (mode === "life") {
+    idx = getNatalMingIndex(a);
+  } else if (mode === "decadal") {
+    idx = h ? scopeMingPalaceIndex(h, "decadal") : null;
+  } else if (mode === "year" || mode === "month" || mode === "date") {
+    idx = h ? scopeMingPalaceIndex(h, "yearly") : null;
+  }
+
+  if (idx === null || !Number.isFinite(idx)) return { tfNames: new Set(), mingName: null };
+
+  const names = tfNamesByIndex(a, idx); // [命,對宮,三合,三合]
+  const tf = new Set(names);
+  const mingName = palaceNameByNatalIndex(a, idx);
+  return { tfNames: tf, mingName };
+}
+
+function branchLabel(pal) {
+  const hs = pal?.heavenlyStem || "";
+  const eb = pal?.earthlyBranch || "";
+  return hs && eb ? `${hs}${eb}` : `${hs || ""}${eb || ""}`;
+}
+
+function renderChartFromAstrolabe(astrolabe, highlight = { tfNames: new Set(), mingName: null }) {
+  if (!chartGridEl) return;
+  if (!astrolabe?.palaces?.length) {
+    chartGridEl.innerHTML = `<div class="hint">No chart (select a profile and generate first).</div>`;
+    return;
+  }
+
+  // Build: earthlyBranch -> palace
+  const byBranch = new Map();
+  for (const p of astrolabe.palaces) {
+    const b = p?.earthlyBranch;
+    if (b) byBranch.set(b, p);
+  }
+
+  // Traditional fixed branch placement so that:
+  // 寅 = bottom-left, 申 = top-right
+  // Ring coordinates (row,col) in 4x4:
+  // bottom row:  寅 卯 辰 巳
+  // right col:   午 未 (top-right corner=申)
+  // top row:     申 酉 戌 亥 (right->left)
+  // left col:    子 丑 (downwards)
+// Traditional fixed branch placement so that:
+// 巳 = top-left, 申 = top-right
+// 寅 = bottom-left, 亥 = bottom-right
+//
+// Ring order (clockwise from top-left):
+// 巳 午 未 申 | 酉 戌 | 亥 子 丑 寅 | 卯 辰
+const ring = [
+  // top row (left -> right)
+  { r: 0, c: 0, br: "巳" },
+  { r: 0, c: 1, br: "午" },
+  { r: 0, c: 2, br: "未" },
+  { r: 0, c: 3, br: "申" },
+
+  // right column (top -> bottom, excluding corners)
+  { r: 1, c: 3, br: "酉" },
+  { r: 2, c: 3, br: "戌" },
+
+  // bottom row (right -> left)
+  { r: 3, c: 3, br: "亥" },
+  { r: 3, c: 2, br: "子" },
+  { r: 3, c: 1, br: "丑" },
+  { r: 3, c: 0, br: "寅" },
+
+  // left column (bottom -> top, excluding corners)
+  { r: 2, c: 0, br: "卯" },
+  { r: 1, c: 0, br: "辰" },
+];
+  // Prepare 4x4 grid slots
+  const slots = Array.from({ length: 16 }, () => null);
+  const idxOf = (r, c) => r * 4 + c;
+  for (const x of ring) slots[idxOf(x.r, x.c)] = x.br;
+
+  const tfNames = highlight?.tfNames instanceof Set ? highlight.tfNames : new Set();
+  const mingName = highlight?.mingName || null;
+
+  const cellHtml = (br) => {
+    if (!br) {
+      return `<div style="border:1px dashed rgba(255,255,255,0.10); border-radius:12px; padding:10px; background:rgba(0,0,0,0.08)"></div>`;
+    }
+
+    const pal = byBranch.get(br);
+
+    // Empty but fixed branch cell (should be rare)
+    if (!pal) {
+      return `
+        <div style="
+          border:1px solid rgba(255,255,255,0.10);
+          border-radius:12px;
+          padding:10px;
+          background:#0f1117;
+          min-height:130px;
+          opacity:0.75;
+        ">
+          <div style="font-weight:900; display:flex; justify-content:space-between; gap:10px">
+            <div>（無）</div>
+            <div style="opacity:0.85">${escapeHtml(br)}</div>
+          </div>
+          <div style="margin-top:8px; font-size:12.5px; line-height:1.35">No palace mapped</div>
+        </div>
+      `;
+    }
+
+    const r = pal?.decadal?.range;
+    const rangeText =
+      Array.isArray(r) &&
+      r.length >= 2 &&
+      Number.isFinite(Number(r[0])) &&
+      Number.isFinite(Number(r[1]))
+        ? `${Math.trunc(r[0])}–${Math.trunc(r[1])}`
+        : "N/A";
+
+    const stars = palaceStarsLine(pal);
+    const dz = branchLabel(pal) || br;
+
+    const isTF = tfNames.has(pal.name);
+    const isMing = mingName && pal.name === mingName;
+
+    // Highlight styles
+    const baseBorder = "rgba(255,255,255,0.10)";
+    const hlBorder = "rgba(255, 215, 0, 0.65)";     // yellow
+    const hlBorderM = "rgba(255, 215, 0, 0.92)";    // darker yellow for 命
+    const hlBg = "rgba(255, 215, 0, 0.08)";
+    const hlBgM = "rgba(255, 215, 0, 0.16)";
+
+    const borderColor = isMing ? hlBorderM : isTF ? hlBorder : baseBorder;
+    const bgColor = isMing ? hlBgM : isTF ? hlBg : "#0f1117";
+
+    return `
+      <div style="
+        border:1px solid ${borderColor};
+        border-radius:12px;
+        padding:10px;
+        background:${bgColor};
+        min-height:130px;
+        box-shadow:${isTF ? "0 0 0 1px rgba(255,215,0,0.12)" : "none"};
+      ">
+        <div style="font-weight:900; display:flex; justify-content:space-between; gap:10px">
+          <div>${escapeHtml(pal.name || "")}${isMing ? "（命）" : ""}</div>
+          <div style="opacity:0.85">${escapeHtml(dz)}</div>
+        </div>
+
+        <div style="margin-top:4px; font-size:12px; opacity:0.75; font-weight:800">
+          大限：${escapeHtml(rangeText)}
+        </div>
+
+        <div style="margin-top:8px; font-size:12.5px; line-height:1.35">
+          ${stars}
+        </div>
+      </div>
+    `;
+  };
+
+  chartGridEl.innerHTML = slots.map((br) => cellHtml(br)).join("");
+}
+
 
 /* ========= Auto-generate (debounced) ========= */
 let genTimer = null;
@@ -1992,20 +2631,30 @@ function generateNow() {
   try {
     if (!profiles.length) {
       out.textContent = "Please save a chart first (Step 1).";
+      lastPacket = ""; // ✅ prevent stale Data usage
       return;
     }
 
-    const idx = Number(pick.value);
+    const raw = (pick.value ?? "");
+    if (raw === "") {
+      out.textContent = "Please select a saved chart first (Step 1).";
+      lastPacket = ""; // ✅ prevent stale Data usage
+      return;
+    }
+
+    const idx = Number(raw);
     const p = Number.isFinite(idx) ? profiles[idx] : null;
     if (!p) {
       out.textContent = "Please select a saved chart first (Step 1).";
+      lastPacket = "";
       return;
     }
 
     const mode = getSelectedMode();
-    const ctx = ""; // no longer used; chat box is the real input
+    const ctx = "";
 
     out.textContent = "Generating...";
+
 
     let t = "";
     let tDate = null;
@@ -2054,14 +2703,15 @@ function generateNow() {
       targetStr: t,
       targetDate: tDate,
       ctx,
+      focusPalace: "命宫",
     });
 
-out.textContent = renderHuman(A);
-lastPacket = renderPacket(A);
+    out.textContent = renderHuman(A);
+    lastPacket = renderPacket(A);
 
-// If user already has a chat going, refresh the last assistant answer
-// using the updated packet (mode/target/context changes).
-scheduleAutoRefresh(200);
+    scheduleAutoRefresh(200);
+    const hl = buildChartHighlight(A);
+    renderChartFromAstrolabe(A.astrolabe, hl);
 
   } catch (err) {
     out.textContent =
@@ -2071,46 +2721,67 @@ scheduleAutoRefresh(200);
     console.error(err);
   }
 }
+buildDobSelects();
 
 /* initial paint */
 refresh(null);
 updateModeUI();
-out.textContent = "Select a saved chart (Step 1) to auto-generate results.";
+setActiveTab("chat"); // ✅ default tab = Ask
+
+// ✅ If a profile is selected, build asks + generate now
+rebuildAsksForSelectedProfile();
+
+if (profiles.length && (pick.value ?? "") !== "") {
+  setActiveTab("chat");        // ✅ INSERT HERE (startup)
+  scheduleGenerate(0);         // generate immediately
+} else {
+  setActiveTab("chat");        // no selection → chat tab
+  out.textContent = profiles.length
+    ? "Select a saved chart (Step 1) to auto-generate results."
+    : "Please save a chart first (Step 1).";
+  lastPacket = "";             // prevent stale packet
+}
 
 renderChat();
 updateCreditUI();
+
+
 
 /* ========= Events ========= */
 document.querySelectorAll('input[name="mode"]').forEach((r) => {
   r.addEventListener("change", () => {
     updateModeUI();
     scheduleGenerate(0);
-
-    // ✅ ADD THESE TWO LINES
     renderChat();
     updateCreditUI();
   });
 });
 
 pick.addEventListener("change", () => {
-  const idx = Number(pick.value);
+  const raw = (pick.value ?? "");
+  const idx = raw === "" ? NaN : Number(raw);
   const p = Number.isFinite(idx) ? profiles[idx] : null;
   const hasSelection = !!p;
+
+
 
   setDeleteEnabled(hasSelection);
 
   if (hasSelection) {
     rebuildAsksForSelectedProfile();
     scheduleGenerate(0);
-    setActiveTab("data");
-
-    // ✅ ADD THESE TWO LINES
+    setActiveTab("chat");
     renderChat();
     updateCreditUI();
-  } else {
-    out.textContent = "";
-  }
+} else {
+  out.textContent = "";
+  lastPacket = "";        // clear previously generated Data packet
+  setActiveTab("chat");   // optional but recommended: avoids stale Data tab
+  renderChat();           // refresh chat so it no longer uses old packet
+}
+
 });
+
 decadalPick.addEventListener("change", () => {
   scheduleGenerate(0);
   renderChat();
@@ -2128,18 +2799,19 @@ target.addEventListener("input", () => {
   renderChat();
 });
 
+
 /* ========= Actions ========= */
 document.getElementById("save").onclick = () => {
   const shichen = document.getElementById("shichen").value;
 
   const newLabel = (label.value || "").trim();
-  const newDate = (date.value || "").trim();
+  const newDate = getDobYMDFromSelects();
   const newGender = gender.value;
 
-  if (!newLabel || !newDate) {
-    out.textContent = "Please enter Label + Date before saving.";
-    setActiveTab("data");
-    return;
+if (!newLabel || !newDate) {
+  out.textContent = "Please enter Label + Date before saving.";
+  setActiveTab("data");
+  return;
   }
 
   profiles.unshift({
@@ -2150,7 +2822,6 @@ document.getElementById("save").onclick = () => {
   });
 
   saveProfiles(profiles);
-
   refresh(0);
 
   out.textContent = "New chart saved and selected.";
